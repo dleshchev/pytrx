@@ -28,11 +28,12 @@ from matplotlib import pyplot as plt
 
 class ScatData:
     
-    def __init__(self, logFile, dataInDir, dataOutDir, energy, distance, pixelSize, centerX, centerY):
+    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, distance, pixelSize, centerX, centerY):
                 
         self.logFile = logFile
         self.dataInDir = dataInDir
         self.dataOutDir = dataOutDir
+        self.maskPath = maskPath        
         
         self.energy = energy
         self.wavelength = 12.3984/self.energy*1e-10 # in m
@@ -79,14 +80,15 @@ class ScatData:
                                             rot1=0,rot2=0,rot3=0,
                                             wavelength = self.wavelength)
         
-        self.test_image = fabio.open(self.dataInDir + self.logData.ix[0,'file']).data
-        
+        test_image = fabio.open(self.dataInDir + self.logData.ix[0,'file']).data
+        mask = fabio.open(self.maskPath).data        
         print('ScatData: LUT initialization')
         startInitTime = time.clock()
-        q, dummyI = self.ai.integrate1d(self.test_image,1000,
+        q, dummyI = self.ai.integrate1d(test_image,1000,
                                  correctSolidAngle=True,
                                  polarization_factor=1,
                                  method='lut',
+                                 mask = mask,
                                  unit="q_A^-1")
         print('ScatData: LUT initialization took', '%.0f' % round(((time.clock()-startInitTime)*1000), 0),'ms')
         plt.plot(q, dummyI)
@@ -95,6 +97,7 @@ class ScatData:
 A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log',
              dataInDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/',
              dataOutDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/',
+             maskPath = '/media/denis/Data/work/Experiments/2017/Ubiquitin/mask_aug2017.tif',
              energy = 11.63,
              distance = 362,
              pixelSize = 82e-6,
