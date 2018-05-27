@@ -13,7 +13,7 @@ todo:
 - Make valCheck spit out proper Warnings/Messages
 - Make the code accept multiple runs
 - if only multiple logFiles provided with only one InDir, InDir should be the same for all of the logFiles
-
+- get a temporary mask reader
 """
 from pathlib import Path
 import time
