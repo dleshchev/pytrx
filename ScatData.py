@@ -17,6 +17,7 @@ todo:
 """
 from pathlib import Path
 import time
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -48,6 +49,7 @@ class ScatData:
         
         self.getLogData()        
         self.getDelaysNum()
+        self.getTimeStamps()
 #        self.getLUT()
         
     def valCheck(self):
@@ -129,15 +131,18 @@ class ScatData:
         self.delays = np.array(self.delays)
         self.dt = np.unique(self.delays)
                         
-                
-            
-        
-        def getDifferences(self):
-            delays = self.logData['']
-            self.dS = np.array([])
-            for t in self.delays:
-                if (t-self.toff).abs()>1e-12:
-                    np.append(self.dS, )
+    def getTimeStamps(self):
+        timeStampList = self.logData['date time'].tolist()
+        self.timeStamps = []
+        for t in timeStampList:
+            self.timeStamps.append(datetime.strptime(t,'%d-%b-%y %H:%M:%S').timestamp())
+        self.timeStamps = np.array(self.timeStamps)
+    
+#    def getDifferences(self):
+#        self.dS = np.array([])
+#        for t in self.delays:
+#            if (t-self.toff).abs()>1e-12:
+#                np.append(self.dS, )
 
         
         
