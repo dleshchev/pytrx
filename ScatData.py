@@ -28,7 +28,7 @@ from matplotlib import pyplot as plt
 
 class ScatData:
     
-    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, distance, pixelSize, centerX, centerY):
+    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, distance, pixelSize, centerX, centerY, toff = '-5us'):
                 
         self.logFile = logFile
         self.dataInDir = dataInDir
@@ -41,12 +41,14 @@ class ScatData:
         self.pixelSize = pixelSize
         self.centerX = centerX
         self.centerY = centerY
+
+        self.toff = toff        
         
         self.valCheck()
         
         self.getLogData()        
-        
-        self.getLUT()
+        self.getDelaysNum()
+#        self.getLUT()
         
     def valCheck(self):
         if not Path(self.logFile).is_file():
@@ -80,18 +82,63 @@ class ScatData:
                                             rot1=0,rot2=0,rot3=0,
                                             wavelength = self.wavelength)
         
-        test_image = fabio.open(self.dataInDir + self.logData.ix[0,'file']).data
-        mask = fabio.open(self.maskPath).data        
-        print('ScatData: LUT initialization')
-        startInitTime = time.clock()
-        q, dummyI = self.ai.integrate1d(test_image,1000,
-                                 correctSolidAngle=True,
-                                 polarization_factor=1,
-                                 method='lut',
-                                 mask = mask,
-                                 unit="q_A^-1")
-        print('ScatData: LUT initialization took', '%.0f' % round(((time.clock()-startInitTime)*1000), 0),'ms')
-        plt.plot(q, dummyI)
+        mask = fabio.open(self.maskPath).data
+        nFiles = self.logData.shape[0]
+        nPt = 401
+        self.S = np.zeros([nPt, nFiles])
+        
+        idxIm = 1
+        print('*** Integration ***')
+        for i,file in enumerate(self.logData['file']):
+            path = (self.dataInDir + file)
+            startReadTime = time.clock()         
+            image = fabio.open(path).data
+            readTime = time.clock() - startReadTime
+            
+            startIntTime = time.clock()
+            q, self.S[:,i] = self.ai.integrate1d(image,400,
+                                            radial_range = [0.0, 4.0],
+                                            correctSolidAngle=True,
+                                            polarization_factor=1,
+                                            method='lut',
+                                            mask = mask,
+                                            unit="q_A^-1")
+            intTime = time.clock() - startIntTime
+            print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
+            idxIm += 1
+        print('*** Integration done ***')
+        self.q = q
+        plt.plot(self.q, self.S)
+        
+    def getDelaysNum(self):
+           
+        self.delays_str = self.logData['delay'].tolist()
+        self.delays = []
+        for t_str in self.delays_str:
+            try:
+                self.delays.append(float(t_str))
+            except ValueError:
+                if 'ps' in t_str:
+                    self.delays.append(float(t_str[0:-2])*1e-12)
+                elif 'ns' in t_str:
+                    self.delays.append(float(t_str[0:-2])*1e-9)
+                elif 'us' in t_str:
+                    self.delays.append(float(t_str[0:-2])*1e-6)
+                elif 'ms' in t_str:
+                    self.delays.append(float(t_str[0:-2])*1e-3)
+        self.delays = np.array(self.delays)
+        self.dt = np.unique(self.delays)
+                        
+                
+            
+        
+        def getDifferences(self):
+            delays = self.logData['']
+            self.dS = np.array([])
+            for t in self.delays:
+                if (t-self.toff).abs()>1e-12:
+                    np.append(self.dS, )
+
         
         
 A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log',
@@ -102,4 +149,5 @@ A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log
              distance = 362,
              pixelSize = 82e-6,
              centerX = 1990,
-             centerY = 1967)
+             centerY = 1967,
+             toff = '-5us')
