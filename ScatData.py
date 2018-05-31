@@ -16,8 +16,10 @@ todo:
 - get a temporary mask reader
 """
 from pathlib import Path
+import ntpath
 import time
 from datetime import datetime
+from collections import namedtuple
 
 import numpy as np
 import pandas as pd
@@ -48,11 +50,11 @@ class ScatData:
         
         self.valCheck()
         
-        self.getLogData()        
-        self.getDelaysNum()
-        self.getTimeStamps()
-        self.getLUT()
-        self.getDifferences()
+        self.getLogData()    
+#        self.getDelaysNum()
+#        self.getTimeStamps()
+
+#        self.getDifferences()
 
         
     def valCheck(self):
@@ -79,19 +81,32 @@ class ScatData:
         
         
 
-    def getLUT(self):
-        self.ai = pyFAI.AzimuthalIntegrator(dist = self.distance,
-                                            poni1 = self.centerY*self.pixelSize,
-                                            poni2 = self.centerX*self.pixelSize,
-                                            pixel1 = self.pixelSize,
-                                            pixel2 = self.pixelSize,
-                                            rot1=0,rot2=0,rot3=0,
-                                            wavelength = self.wavelength)
+    def getAIGeometry(self):
+        # First, lets get the geometry parameters for integration
+        self.AIGeometry = namedtuple('AIGeometry', 'ai mask nPt radialRange')
+        self.AIGeometry.ai = pyFAI.AzimuthalIntegrator(dist = self.distance,
+                                                       poni1 = self.centerY*self.pixelSize,
+                                                       poni2 = self.centerX*self.pixelSize,
+                                                       pixel1 = self.pixelSize,
+                                                       pixel2 = self.pixelSize,
+                                                       rot1=0,rot2=0,rot3=0,
+                                                       wavelength = self.wavelength)
+        self.AIGeometry.mask = fabio.open(self.maskPath).data
+        self.AIGeometry.nPt = 400
+        self.AIGeometry.radialRange = [0.0, 4.0]
         
-        mask = fabio.open(self.maskPath).data
-        nFiles = self.logData.shape[0]
-        nPt = 400
-        self.S = np.zeros([nPt, nFiles])
+        
+    def integrate(self):
+        # Now lets get the integration going
+        if not hasattr(self, 'AIGeometry'):
+            self.getAIGeometry()
+            self.total = namedtuple('total','S S_raw normInt delay delay_str timeStamp timeStamp_str scanStamp')        
+            nFiles = self.logData.shape[0]        
+            self.total.S = np.zeros([self.AIGeometry.nPt, nFiles])
+            self.total.S_raw = np.zeros([self.AIGeometry.nPt, nFiles])
+            self.total.delay, self.total.delay_str = self.getDelays()
+            self.total.timeStamp, self.total.timeStamp_str = self.getTimeStamps()
+            self.total.scanStamp = [ntpath.splitext(ntpath.basename(self.logFile))[0]]*nFiles
         
         idxIm = 1
         print('*** Integration ***')
@@ -102,29 +117,33 @@ class ScatData:
             readTime = time.clock() - startReadTime
             
             startIntTime = time.clock()
-            q, self.S[:,i] = self.ai.integrate1d(image,nPt,
-                                            radial_range = [0.0, 4.0],
-                                            correctSolidAngle=True,
-                                            polarization_factor=1,
-                                            method='lut',
-                                            mask = mask,
-                                            unit="q_A^-1")
+            q, self.total.S[:,i] = self.AIGeometry.ai.integrate1d(
+                                    image,
+                                    self.AIGeometry.nPt,
+                                    radial_range = self.AIGeometry.radialRange,
+                                    correctSolidAngle = True,
+                                    polarization_factor = 1,
+                                    method = 'lut',
+                                    mask = self.AIGeometry.mask,
+                                    unit = "q_A^-1")
             intTime = time.clock() - startIntTime
             print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
             idxIm += 1
         print('*** Integration done ***')
         self.q = q
-        plt.plot(self.q, self.S)
+        plt.plot(self.q, self.total.S)
 
 
         
-    def getDelaysNum(self):           
-        self.delays_str = self.logData['delay'].tolist()
-        self.delays = []
-        for t_str in self.delays_str:
-            self.delays.append(self.time_str2num(t_str))            
-        self.delays = np.array(self.delays)
-        self.dt = np.unique(self.delays)
+    def getDelays(self):           
+        delay_str = self.logData['delay'].tolist()
+        delay = []
+        for t_str in delay_str:
+            delay.append(self.time_str2num(t_str))            
+        delay = np.array(delay)
+        return delay, delay_str
+
+
         
     def time_str2num(self, t_str):
         try:
@@ -143,12 +162,12 @@ class ScatData:
 
                         
     def getTimeStamps(self):
-        timeStampList = self.logData['date time'].tolist()
-        self.timeStamps = []
-        for t in timeStampList:
-            self.timeStamps.append(datetime.strptime(t,'%d-%b-%y %H:%M:%S').timestamp())
-        self.timeStamps = np.array(self.timeStamps)
-    
+        timeStamp_str = self.logData['date time'].tolist()
+        timeStamp = []
+        for t in timeStamp_str:
+            timeStamp.append(datetime.strptime(t,'%d-%b-%y %H:%M:%S').timestamp())
+        timeStamp = np.array(timeStamp)
+        return timeStamp, timeStamp_str
 
     
     def getDifferences(self):
