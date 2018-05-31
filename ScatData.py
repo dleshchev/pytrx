@@ -29,7 +29,7 @@ from matplotlib import pyplot as plt
 
 class ScatData:
     
-    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, distance, pixelSize, centerX, centerY, toff = '-5us'):
+    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, distance, pixelSize, centerX, centerY, toff_str = '-5us'):
                 
         self.logFile = logFile
         self.dataInDir = dataInDir
@@ -43,14 +43,17 @@ class ScatData:
         self.centerX = centerX
         self.centerY = centerY
 
-        self.toff = toff        
+        self.toff_str = toff_str
+        self.toff = self.time_str2num(toff_str)
         
         self.valCheck()
         
         self.getLogData()        
         self.getDelaysNum()
         self.getTimeStamps()
-#        self.getLUT()
+        self.getLUT()
+        self.getDifferences()
+
         
     def valCheck(self):
         if not Path(self.logFile).is_file():
@@ -59,6 +62,7 @@ class ScatData:
             print("input directory does not exist")
         if not Path(self.dataOutDir).is_dir():
             print("output directory does not exist")
+
 
 
     def getLogData(self):
@@ -86,7 +90,7 @@ class ScatData:
         
         mask = fabio.open(self.maskPath).data
         nFiles = self.logData.shape[0]
-        nPt = 401
+        nPt = 400
         self.S = np.zeros([nPt, nFiles])
         
         idxIm = 1
@@ -98,7 +102,7 @@ class ScatData:
             readTime = time.clock() - startReadTime
             
             startIntTime = time.clock()
-            q, self.S[:,i] = self.ai.integrate1d(image,400,
+            q, self.S[:,i] = self.ai.integrate1d(image,nPt,
                                             radial_range = [0.0, 4.0],
                                             correctSolidAngle=True,
                                             polarization_factor=1,
@@ -111,25 +115,32 @@ class ScatData:
         print('*** Integration done ***')
         self.q = q
         plt.plot(self.q, self.S)
+
+
         
-    def getDelaysNum(self):
-           
+    def getDelaysNum(self):           
         self.delays_str = self.logData['delay'].tolist()
         self.delays = []
         for t_str in self.delays_str:
-            try:
-                self.delays.append(float(t_str))
-            except ValueError:
-                if 'ps' in t_str:
-                    self.delays.append(float(t_str[0:-2])*1e-12)
-                elif 'ns' in t_str:
-                    self.delays.append(float(t_str[0:-2])*1e-9)
-                elif 'us' in t_str:
-                    self.delays.append(float(t_str[0:-2])*1e-6)
-                elif 'ms' in t_str:
-                    self.delays.append(float(t_str[0:-2])*1e-3)
+            self.delays.append(self.time_str2num(t_str))            
         self.delays = np.array(self.delays)
         self.dt = np.unique(self.delays)
+        
+    def time_str2num(self, t_str):
+        try:
+            t = float(t_str)
+        except ValueError:
+            if 'ps' in t_str:
+                t = float(t_str[0:-2])*1e-12
+            elif 'ns' in t_str:
+                t = float(t_str[0:-2])*1e-9
+            elif 'us' in t_str:
+                t = float(t_str[0:-2])*1e-6
+            elif 'ms' in t_str:
+                t = float(t_str[0:-2])*1e-3
+        return t
+
+
                         
     def getTimeStamps(self):
         timeStampList = self.logData['date time'].tolist()
@@ -138,14 +149,29 @@ class ScatData:
             self.timeStamps.append(datetime.strptime(t,'%d-%b-%y %H:%M:%S').timestamp())
         self.timeStamps = np.array(self.timeStamps)
     
-#    def getDifferences(self):
-#        self.dS = np.array([])
-#        for t in self.delays:
-#            if (t-self.toff).abs()>1e-12:
-#                np.append(self.dS, )
+
+    
+    def getDifferences(self):
+        
+        idx_on = np.abs(self.delays-self.toff)>1e-12
+        idx_off = np.abs(self.delays-self.toff)<1e-12
+        S_on = self.S[idx_on]
+        S_off = self.S[idx_off]
+        delays_on = self.delays[idx_on]
+#        delays_off = self.delays[idx_off]   
+        timeStamps_on = self.timeStamps[idx_on]
+        timeStamps_off = self.timeStamps[idx_off]
+        
+        self.dS = np.zeros([np.shape(self.q)[0], np.shape(delays_on)[0]])
+        
+        for i,t in enumerate(delays_on):
+            # find the index of closest ref curve
+            idx_closest = np.argmin(timeStamps_on[i] - timeStamps_off)
+            self.dS[:,i] = S_on[:,i] - S_off[:,idx_closest]
 
         
         
+# check the data
 A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log',
              dataInDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/',
              dataOutDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/',
@@ -155,4 +181,4 @@ A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log
              pixelSize = 82e-6,
              centerX = 1990,
              centerY = 1967,
-             toff = '-5us')
+             toff_str = '-5us')
