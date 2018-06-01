@@ -13,7 +13,8 @@ todo:
 - Make valCheck spit out proper Warnings/Messages
 - Make the code accept multiple runs
 - if only multiple logFiles provided with only one InDir, InDir should be the same for all of the logFiles
-- get a temporary mask reader
+- optimize mask usage memory (now you keep it everywhere for no need)
+- add subtraction
 """
 from pathlib import Path
 import ntpath
@@ -31,7 +32,9 @@ from matplotlib import pyplot as plt
 
 class ScatData:
     
-    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, distance, pixelSize, centerX, centerY, toff_str = '-5us'):
+    def __init__(self, logFile, dataInDir, dataOutDir, maskPath, energy, 
+                 distance, pixelSize, centerX, centerY, qNormRange,
+                 toff_str = '-5us'):
                 
         self.logFile = logFile
         self.dataInDir = dataInDir
@@ -47,6 +50,7 @@ class ScatData:
 
         self.toff_str = toff_str
         self.toff = self.time_str2num(toff_str)
+        self.qNormRange = qNormRange
         
         self.valCheck()
         
@@ -104,6 +108,7 @@ class ScatData:
             nFiles = self.logData.shape[0]        
             self.total.S = np.zeros([self.AIGeometry.nPt, nFiles])
             self.total.S_raw = np.zeros([self.AIGeometry.nPt, nFiles])
+            self.total.normInt = np.zeros(nFiles)
             self.total.delay, self.total.delay_str = self.getDelays()
             self.total.timeStamp, self.total.timeStamp_str = self.getTimeStamps()
             self.total.scanStamp = [ntpath.splitext(ntpath.basename(self.logFile))[0]]*nFiles
@@ -117,7 +122,7 @@ class ScatData:
             readTime = time.clock() - startReadTime
             
             startIntTime = time.clock()
-            q, self.total.S[:,i] = self.AIGeometry.ai.integrate1d(
+            q, self.total.S_raw[:,i] = self.AIGeometry.ai.integrate1d(
                                     image,
                                     self.AIGeometry.nPt,
                                     radial_range = self.AIGeometry.radialRange,
@@ -129,6 +134,10 @@ class ScatData:
             intTime = time.clock() - startIntTime
             print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
             idxIm += 1
+            qNormRangeMask = (q>=self.qNormRange[0]) & (q<=self.qNormRange[1])
+            self.total.normInt[i] = np.trapz(self.total.S_raw[qNormRangeMask,i], 
+                                             q[qNormRangeMask])
+            self.total.S[:,i] = self.total.S_raw[:,i]/self.total.normInt[i]
         print('*** Integration done ***')
         self.q = q
         plt.plot(self.q, self.total.S)
@@ -200,4 +209,5 @@ A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log
              pixelSize = 82e-6,
              centerX = 1990,
              centerY = 1967,
+             qNormRange = [2,3],
              toff_str = '-5us')
