@@ -32,7 +32,7 @@ from matplotlib import pyplot as plt
 
 class ScatData:
     
-    def __init__(self, logFile, dataInDir, dataOutDir):
+    def __init__(self, logFile = None, dataInDir = None, dataOutDir = None):
 #    , maskPath, energy, 
 #                 distance, pixelSize, centerX, centerY, qNormRange,
 #                 toff_str = '-5us'):
@@ -69,75 +69,72 @@ class ScatData:
         self.logData = self.logData.drop(idxToDel)
         
         # get the number of time delays and number of files
-        print('Found {} files'.format(len(A.logData['delay'].tolist())))
-        print('Found {} time delays'.format(len(np.unique(A.logData['delay'].tolist()))))
+        print('Found %s files' % (len(self.logData['delay'].tolist())))
+        print('Found %s time delays' % (len(np.unique(self.logData['delay'].tolist()))))
 
 
 
-    def getLogData(self):
-
-
-    def getAIGeometry(self):
-        # First, lets get the geometry parameters for integration
-        self.AIGeometry = namedtuple('AIGeometry', 'ai mask nPt radialRange')
-        self.AIGeometry.ai = pyFAI.AzimuthalIntegrator(dist = self.distance,
-                                                       poni1 = self.centerY*self.pixelSize,
-                                                       poni2 = self.centerX*self.pixelSize,
-                                                       pixel1 = self.pixelSize,
-                                                       pixel2 = self.pixelSize,
+    def getAIGeometry(self, energy, distance, pixelSize, centerX, centerY, qRange, nqpt, qNormRange):
+        wavelen = 12.3984/energy*1e-10 # in m
+        self.AIGeometry = namedtuple('AIGeometry', 'ai nqpt qRange qNormRange')
+        self.AIGeometry.ai = pyFAI.AzimuthalIntegrator(dist = distance*1e-3,
+                                                       poni1 = centerY*pixelSize,
+                                                       poni2 = centerX*pixelSize,
+                                                       pixel1 = pixelSize,
+                                                       pixel2 = pixelSize,
                                                        rot1=0,rot2=0,rot3=0,
-                                                       wavelength = self.wavelength)
-        self.AIGeometry.mask = fabio.open(self.maskPath).data
-        self.AIGeometry.nPt = 400
-        self.AIGeometry.radialRange = [0.0, 4.0]
+                                                       wavelength = wavelen)
+        self.AIGeometry.qNormRange = qNormRange
         
         
-    def integrate(self):
-        # Now lets get the integration going
-        if not hasattr(self, 'AIGeometry'):
-            self.getAIGeometry()
-            self.total = namedtuple('total','s s_raw normInt delay delay_str t t_str timeStamp timeStamp_str scanStamp')        
-            nFiles = self.logData.shape[0]        
-            self.total.s = np.zeros([self.AIGeometry.nPt, nFiles])
-            self.total.s_raw = np.zeros([self.AIGeometry.nPt, nFiles])
-            self.total.normInt = np.zeros(nFiles)
-            self.total.delay, self.total.delay_str = self.getDelays()
-            self.total.t = np.unique(self.total.delay)
-            self.total.t_str = np.unique(self.total.delay_str)
-            self.total.timeStamp, self.total.timeStamp_str = self.getTimeStamps()
-            self.total.scanStamp = [ntpath.splitext(ntpath.basename(self.logFile))[0]]*nFiles
+        
+    def integrate(self, energy=12, distance=365, pixelSize=80e-6, centerX=1900, centerY=1900, qRange=[0.0,4.0], nqpt=400, qNormRange=[1.9,2.1], maskPath=None):
+        self.getAIGeometry(energy, distance, pixelSize, centerX, centerY, qRange, nqpt, qNormRange)
+        if maskPath:
+            assert Path(maskPath).is_file(), 'mask file not found'
+            maskImage = fabio.open(maskPath).data
+
+        self.total = namedtuple('total','s s_raw normInt delay delay_str t t_str timeStamp timeStamp_str scanStamp')        
+        nFiles = self.logData.shape[0]        
+        self.total.s = np.zeros([nqpt, nFiles])
+        self.total.s_raw = np.zeros([nqpt, nFiles])
+        self.total.normInt = np.zeros(nFiles)
+        self.total.delay, self.total.delay_str = self.getDelays()
+        self.total.t = np.unique(self.total.delay)
+        self.total.t_str = np.unique(self.total.delay_str)
+        self.total.timeStamp, self.total.timeStamp_str = self.getTimeStamps()
+        self.total.scanStamp = [ntpath.splitext(ntpath.basename(self.logFile))[0]]*nFiles
             
-#        idxIm = 1
-#        print('*** Integration ***')
-#        for i,file in enumerate(self.logData['file']):
-#            path = (self.dataInDir + file)
-#            startReadTime = time.clock()         
-#            image = fabio.open(path).data
-#            readTime = time.clock() - startReadTime
-#            
-#            startIntTime = time.clock()
-#            q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(
-#                                    image,
-#                                    self.AIGeometry.nPt,
-#                                    radial_range = self.AIGeometry.radialRange,
-#                                    correctSolidAngle = True,
-#                                    polarization_factor = 1,
-#                                    method = 'lut',
-#                                    mask = self.AIGeometry.mask,
-#                                    unit = "q_A^-1")
-#            intTime = time.clock() - startIntTime
-#            print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
-#            idxIm += 1
-#            qNormRangeMask = (q>=self.qNormRange[0]) & (q<=self.qNormRange[1])
-#            self.total.normInt[i] = np.trapz(self.total.S_raw[qNormRangeMask,i], 
-#                                             q[qNormRangeMask])
-#            self.total.s[:,i] = self.total.S_raw[:,i]/self.total.normInt[i]
-#        print('*** Integration done ***')
-#        self.q = q
-#        plt.plot(self.q, self.total.S)
-
-
+        idxIm = 1
+        print('*** Integration ***')
+        for i,file in enumerate(self.logData['file']):
+            path = (self.dataInDir + file)
+            startReadTime = time.clock()         
+            image = fabio.open(path).data
+            readTime = time.clock() - startReadTime
+            startIntTime = time.clock()
+            q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(image, nqpt,
+                                    radial_range = qRange,
+                                    correctSolidAngle = True,
+                                    polarization_factor = 1,
+                                    method = 'lut',
+                                    mask = maskImage,
+                                    unit = "q_A^-1")
+            intTime = time.clock() - startIntTime
+            print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
+            idxIm += 1
         
+            qNormRangeSel = (q>=qNormRange[0]) & (q<=qNormRange[1])
+            self.total.normInt[i] = np.trapz(self.total.s_raw[qNormRangeSel,i], 
+                                                        q[qNormRangeSel])
+            self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
+        
+        print('*** Integration done ***')
+        self.q = q
+        plt.plot(self.q, self.total.s)
+
+
+
     def getDelays(self):           
         delay_str = self.logData['delay'].tolist()
         delay = []
@@ -175,6 +172,7 @@ class ScatData:
         timeStamp = np.array(timeStamp)
         return timeStamp, timeStamp_str
 
+    
     
     def getDifferences(self):
         
@@ -221,11 +219,13 @@ class ScatData:
 A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log',
              dataInDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/',
              dataOutDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/')
-#             maskPath = '/media/denis/Data/work/Experiments/2017/Ubiquitin/mask_aug2017.tif',
-#             energy = 11.63,
-#             distance = 362,
-#             pixelSize = 82e-6,
-#             centerX = 1990,
-#             centerY = 1967,
-#             qNormRange = [2,3],
-#             toff_str = '-5us')
+             
+A.integrate(energy = 11.63,
+            distance = 362,
+            pixelSize = 82e-6,
+            centerX = 1990,
+            centerY = 1967,
+            qRange = [0.0, 4.0],
+            nqpt=400,
+            qNormRange = [1.9,2.1],
+            maskPath = '/media/denis/Data/work/Experiments/2017/Ubiquitin/mask_aug2017.tif')
