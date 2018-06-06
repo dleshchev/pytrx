@@ -9,11 +9,8 @@ ScatData - a data class for opearating scattering data recorded primaily at BioC
 @author: Denis Leshchev
 
 todo:
-- Make valCheck to demand correct input
-- Make valCheck spit out proper Warnings/Messages
 - Make the code accept multiple runs
 - if only multiple logFiles provided with only one InDir, InDir should be the same for all of the logFiles
-- optimize mask usage memory (now you keep it everywhere for no need)
 - add subtraction
 """
 from pathlib import Path
@@ -33,27 +30,10 @@ from matplotlib import pyplot as plt
 class ScatData:
     
     def __init__(self, logFile = None, dataInDir = None, dataOutDir = None):
-#    , maskPath, energy, 
-#                 distance, pixelSize, centerX, centerY, qNormRange,
-#                 toff_str = '-5us'):
-                
         self.logFile = logFile
         self.dataInDir = dataInDir
         self.dataOutDir = dataOutDir
 
-#        self.maskPath = maskPath
-#        
-#        self.energy = energy
-#        self.wavelength = 12.3984/self.energy*1e-10 # in m
-#        self.distance = distance*1e-3 # in m
-#        self.pixelSize = pixelSize
-#        self.centerX = centerX
-#        self.centerY = centerY
-#
-#        self.toff_str = toff_str
-#        self.toff = self.time_str2num(toff_str)
-#        self.qNormRange = qNormRange
-#        
         assert Path(self.logFile).is_file(), 'log file not found'
         assert Path(self.dataInDir).is_dir(), 'input directory not found'
         assert Path(self.dataOutDir).is_dir(), 'output directory not found'
@@ -61,7 +41,7 @@ class ScatData:
         self.logData = pd.read_csv(logFile, sep = '\t', header = 18)
         self.logData.rename(columns = {'#date time':'date time'}, inplace = True)
         
-        # remove files that for whatever reason do not exist
+        # remove files that for whatever reason do not exist from logData
         idxToDel = []
         for i, row in self.logData.iterrows():
             if not Path(self.dataInDir + self.logData.ix[i,'file']).is_file():
@@ -84,8 +64,9 @@ class ScatData:
                                                        pixel2 = pixelSize,
                                                        rot1=0,rot2=0,rot3=0,
                                                        wavelength = wavelen)
+        self.AIGeometry.qRange = qRange
         self.AIGeometry.qNormRange = qNormRange
-        
+        self.AIGeometry.nqpt = nqpt
         
         
     def integrate(self, energy=12, distance=365, pixelSize=80e-6, centerX=1900, centerY=1900, qRange=[0.0,4.0], nqpt=400, qNormRange=[1.9,2.1], maskPath=None):
@@ -131,7 +112,7 @@ class ScatData:
         
         print('*** Integration done ***')
         self.q = q
-        plt.plot(self.q, self.total.s)
+#        plt.plot(self.q, self.total.s)
 
 
 
@@ -174,44 +155,40 @@ class ScatData:
 
     
     
-    def getDifferences(self):
+    def getDifferences(self, toff_str = '-5us', subtractFlag = 'Closest'):
         
-        self.diff = namedtuple('ds', 'ds delay t timeStamp')
-        self.diff.ds = []
+        self.diff = namedtuple('ds', 'ds delay timeStamp t t_str ')
+        self.diff.ds = np.empty((self.AIGeometry.nqpt,0),dtype=float)
         self.diff.delay = []
+        self.diff.timeStamp = []
         self.diff.t = self.total.t
         self.diff.t_str = self.total.t_str
-        self.diff.timeStamp = []
         
-        delaySelIDRef = self.total.delay_str == self.toff_str
-        s_ref = self.total.s[:, delaySelIDRef]
-        timeStamp_ref = self.total.timeStamp[delaySelIDRef]
-        timeStampThresh = np.median(timeStamp_ref)*1.1
+        delaySelRef = self.total.delay_str == toff_str
+        s_ref = self.total.s[:, delaySelRef]
+        timeStamp_ref = self.total.timeStamp[delaySelRef]
+#        timeStampThresh = np.median(timeStamp_ref)*1.1
         
-        for specificDelay in self.diff.t:
-            if self.diff.t_str == self.toff_str:
-                pass
+        for specificDelay in self.diff.t_str:
+            if specificDelay == toff_str:
+                ds_dummy = np.empty((self.AIGeometry.nqpt,0),dtype=float)
                 
             else:
-                delaySelID = self.total.delay == specificDelay
-                s_loc = self.total.s[delaySelID]
-                timeStamp_loc = self.total.timeStamp[delaySelID]
-                timeStampDif_loc = np.abs(timeStamp_loc[newaxis].T - timeStamp_ref)
-                timeStampDif_ID = timeStampDif_loc<=timeStampThresh
-                s_ref_tbs = np.mean(s_ref[:,timeStampDif_ID], axis = 1)
+                delaySel = self.total.delay_str == specificDelay
+                s_loc = self.total.s[:,delaySel]
+                timeStamp_loc = self.total.timeStamp[delaySel]
+                timeStampDif_loc = np.abs(timeStamp_loc[np.newaxis].T - timeStamp_ref)
+                if subtractFlag == 'Closest':
+                    idx_tbs = np.argmin(timeStampDif_loc, axis=1)
+                    print(idx_tbs)
+                    s_ref_tbs = s_ref[:,idx_tbs]
                 ds_dummy = s_loc - s_ref_tbs
-                
+            
+            self.diff.ds = np.concatenate((self.diff.ds, ds_dummy), axis=1)
         
-        
-        
-#        delays_off = self.delays[idx_off]   
-        
-        self.dS = np.zeros([np.shape(self.q)[0], np.shape(delays_on)[0]])
-        
-        for i,t in enumerate(delays_on):
-            # find the index of closest ref curve
-            idx_closest = np.argmin(timeStamps_on[i] - timeStamps_off)
-            self.dS[:,i] = S_on[:,i] - S_off[:,idx_closest]
+        plt.figure(1)
+        plt.plot(self.q, self.diff.ds)
+        plt.show()
 
         
         
@@ -229,3 +206,6 @@ A.integrate(energy = 11.63,
             nqpt=400,
             qNormRange = [1.9,2.1],
             maskPath = '/media/denis/Data/work/Experiments/2017/Ubiquitin/mask_aug2017.tif')
+            
+A.getDifferences(toff_str = '-5us', 
+                 subtractFlag = 'Closest')
