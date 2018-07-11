@@ -21,6 +21,7 @@ from collections import namedtuple
 
 import numpy as np
 import pandas as pd
+import sympy
 
 import pyFAI
 import fabio
@@ -44,7 +45,7 @@ class ScatData:
         # remove files that for whatever reason do not exist from logData
         idxToDel = []
         for i, row in self.logData.iterrows():
-            if not Path(self.dataInDir + self.logData.ix[i,'file']).is_file():
+            if not Path(self.dataInDir + self.logData.loc[i,'file']).is_file():
                 idxToDel.append(i)
         self.logData = self.logData.drop(idxToDel)
         
@@ -85,7 +86,8 @@ class ScatData:
         self.total.t_str = np.unique(self.total.delay_str)
         self.total.timeStamp, self.total.timeStamp_str = self.getTimeStamps()
         self.total.scanStamp = [ntpath.splitext(ntpath.basename(self.logFile))[0]]*nFiles
-            
+        
+        self.imageAv = np.zeros(maskImage.shape)
         idxIm = 1
         print('*** Integration ***')
         for i,file in enumerate(self.logData['file']):
@@ -95,12 +97,11 @@ class ScatData:
             readTime = time.clock() - startReadTime
             startIntTime = time.clock()
             q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(image, nqpt,
-                                    radial_range = qRange,
-                                    correctSolidAngle = True,
-                                    polarization_factor = 1,
-                                    method = 'lut',
-                                    mask = maskImage,
-                                    unit = "q_A^-1")
+                                        radial_range = qRange,
+                                        correctSolidAngle = True,
+                                        polarization_factor = 1,
+                                        mask = maskImage,
+                                        unit = "q_A^-1")
             intTime = time.clock() - startIntTime
             print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
             idxIm += 1
@@ -109,9 +110,14 @@ class ScatData:
             self.total.normInt[i] = np.trapz(self.total.s_raw[qNormRangeSel,i], 
                                                         q[qNormRangeSel])
             self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
-        
+            self.imageAv += image
+            if idxIm>6:
+                break
+            
         print('*** Integration done ***')
         self.q = q
+        self.imageAv = self.imageAv/(idxIm-1)
+        self.imageAv[maskImage==1] = 0
 #        plt.plot(self.q, self.total.s)
 
 
@@ -158,54 +164,120 @@ class ScatData:
     def getDifferences(self, toff_str = '-5us', subtractFlag = 'Closest'):
         
         self.diff = namedtuple('ds', 'ds delay timeStamp t t_str ')
-        self.diff.ds = np.empty((self.AIGeometry.nqpt,0),dtype=float)
+        self.diff.ds = np.empty((self.AIGeometry.nqpt,0), dtype=float)
         self.diff.delay = []
         self.diff.timeStamp = []
         self.diff.t = self.total.t
         self.diff.t_str = self.total.t_str
         
-        delaySelRef = self.total.delay_str == toff_str
-        s_ref = self.total.s[:, delaySelRef]
-        timeStamp_ref = self.total.timeStamp[delaySelRef]
-#        timeStampThresh = np.median(timeStamp_ref)*1.1
+        stampDiff = self.total.timeStamp[np.newaxis].T-self.total.timeStamp
+        stampDiff[stampDiff==0] = stampDiff.max()
+        stampDiff[:, self.total.delay_str!=toff_str] = stampDiff.max()
+        mapDiff = np.eye(stampDiff.shape[0])
         
-        for specificDelay in self.diff.t_str:
-            if specificDelay == toff_str:
-                ds_dummy = np.empty((self.AIGeometry.nqpt,0),dtype=float)
-                
-            else:
-                delaySel = self.total.delay_str == specificDelay
-                s_loc = self.total.s[:,delaySel]
-                timeStamp_loc = self.total.timeStamp[delaySel]
-                timeStampDif_loc = np.abs(timeStamp_loc[np.newaxis].T - timeStamp_ref)
-                if subtractFlag == 'Closest':
-                    idx_tbs = np.argmin(timeStampDif_loc, axis=1)
-                    print(idx_tbs)
-                    s_ref_tbs = s_ref[:,idx_tbs]
-                ds_dummy = s_loc - s_ref_tbs
+        if subtractFlag == 'Closest':
+            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
+            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
+            mapDiff = mapDiff[sympy.Matrix(mapDiff).T.rref()[1],:]
+        
+        elif subtractFlag == 'MovingAverage':
+            stampThresh = np.median(np.diff(self.total.timeStamp[self.total.delay_str == toff_str]))*1.1
+            offsTBS = np.abs(stampDiff)<stampThresh
+            mapDiff = self.getWeights(self.total.timeStamp, offsTBS, mapDiff)
+        
+        elif subtractFlag == 'Previous':
+            stampDiff[stampDiff<0] = stampDiff.max()
+            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
+            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
+            mapDiff = np.tril(mapDiff)
+            mapDiff = mapDiff[np.sum(mapDiff, axis=1)==0,:]
             
-            self.diff.ds = np.concatenate((self.diff.ds, ds_dummy), axis=1)
+        elif subtractFlag == 'Next':
+            stampDiff[stampDiff>0] = stampDiff.max()
+            stampDiff = np.abs(stampDiff)
+            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
+            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
+            mapDiff = np.triu(mapDiff)
+            mapDiff = mapDiff[np.sum(mapDiff, axis=1)==0,:]
+            
+        self.diff.ds = np.dot(mapDiff,self.total.s.T).T
+        self.diff.mapDiff = mapDiff
         
-        plt.figure(1)
+        plt.subplot(221)
+        plt.plot(self.q, self.total.s_raw)
+        
+        plt.subplot(222)
+        plt.plot(self.q, self.total.s)
+        
+        plt.subplot(223)
+        plt.imshow(self.diff.mapDiff)
+        
+        plt.subplot(224)
         plt.plot(self.q, self.diff.ds)
-        plt.show()
+        
+        
+        
+    def getWeights(self, timeStamp, offsTBS, mapDiff):
+        for i, stampOn in enumerate(timeStamp):
+            offsTBS_loc = offsTBS[i,:]
+            stampOffs = timeStamp[offsTBS_loc]
+            stampRange = np.diff(stampOffs)
+            if stampRange.size==0:
+                mapDiff[i,offsTBS_loc] = -1
+            elif stampRange.size==1:
+                stampDiffs = abs(stampOn - stampOffs)
+                weights = -(stampDiffs/stampRange)[::-1]
+#                print(np.where(offsTBS_loc))
+#                print(weights)
+                mapDiff[i,offsTBS_loc] = weights
+            else:
+                raise ValueError('Variable stampThresh is too large. Decrease the multiplication factor.')
+        return mapDiff
+                    
+                
+#        self.diff.ds = np.concatenate((self.diff.ds, np.dot(self.mapDiff,self.total.s.T).T), axis=1)
+        
+#        print((stampDiff<stampThresh))
+        
+#        for specificDelay in self.diff.t_str:
+#            delaySel = self.total.delay_str == specificDelay
+#            s_loc = self.total.s[:,delaySel]
+#            timeStamp_loc = self.total.timeStamp[delaySel]
+#            timeStampDif_loc = np.abs(timeStamp_loc[np.newaxis].T - timeStamp_ref)
+#            idx_sort = np.argsort(timeStampDif_loc, axis=1)
+#            
+#            if subtractFlag == 'Closest':
+#                if specificDelay == toff_str:
+#                    ds_dummy = s_ref[:,0:2:]-s_ref[:,1:2:]
+#                else:
+#                    idx_tbs = idx_sort[0,:]
+##                    idx_tbs = np.argmin(timeStampDif_loc, axis=1)
+#                
+#                    ds_dummy = s_loc - s_ref[:,idx_tbs]
+#                    print(specificDelay)
+#                    print(idx_tbs)
+#            self.diff.ds = np.concatenate((self.diff.ds, ds_dummy), axis=1)
+#        
+##        plt.figure(1)
+##        plt.plot(self.q, self.diff.ds)
+##        plt.show()
 
         
-        
-# check the data
-A = ScatData(logFile = '/media/denis/Data/work/Experiments/2017/Ubiquitin/10.log',
-             dataInDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/',
-             dataOutDir = '/media/denis/Data/work/Experiments/2017/Ubiquitin/')
+#%%        
+# Dirty Checking
+A = ScatData(logFile = 'D:\\leshchev_1708\\Ubiquitin\\45.log',
+             dataInDir = 'D:\\leshchev_1708\\Ubiquitin\\',
+             dataOutDir = 'D:\\leshchev_1708\\Ubiquitin\\')
              
 A.integrate(energy = 11.63,
-            distance = 362,
+            distance = 364,
             pixelSize = 82e-6,
-            centerX = 1990,
-            centerY = 1967,
+            centerX = 1987,
+            centerY = 1965,
             qRange = [0.0, 4.0],
             nqpt=400,
             qNormRange = [1.9,2.1],
-            maskPath = '/media/denis/Data/work/Experiments/2017/Ubiquitin/mask_aug2017.tif')
-            
+            maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf')
+#%%
 A.getDifferences(toff_str = '-5us', 
-                 subtractFlag = 'Closest')
+                 subtractFlag = 'Next')
