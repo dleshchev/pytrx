@@ -9,9 +9,7 @@ ScatData - a data class for opearating scattering data recorded primaily at BioC
 @author: Denis Leshchev
 
 todo:
-- Make the code accept multiple runs
-- if only multiple logFiles provided with only one InDir, InDir should be the same for all of the logFiles
-- add subtraction
+
 - add threshFactor keyarg to getDifferences method
 - add average calculation
 """
@@ -31,7 +29,10 @@ import fabio
 from matplotlib import pyplot as plt
 
 class ScatData:
+    '''
+    This is a class for processing, storage and readout of time resolved x-ray solution scattering data
     
+    '''
     def __init__(self, logFile = None, dataInDir = None, dataOutDir = None):
         
         # check if logFile is of correct type and if they exist
@@ -93,6 +94,10 @@ class ScatData:
         assert Path(dataOutDir).is_dir(), 'output directory not found'
     
 
+
+# 1. Integration of images
+
+
         
     def integrate(self, energy=12, distance=365, pixelSize=80e-6, centerX=1900, centerY=1900, qRange=[0.0,4.0], nqpt=400, qNormRange=[1.9,2.1], maskPath=None, plotting = True):
         self.getAIGeometry(energy, distance, pixelSize, centerX, centerY, qRange, nqpt, qNormRange)
@@ -121,12 +126,26 @@ class ScatData:
             image = fabio.open(path).data
             readTime = time.clock() - startReadTime
             startIntTime = time.clock()
-            q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(image, nqpt,
-                                        radial_range = qRange,
-                                        correctSolidAngle = True,
-                                        polarization_factor = 1,
-                                        mask = maskImage,
-                                        unit = "q_A^-1")
+#            q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(image, nqpt,
+#                                        radial_range = qRange,
+#                                        correctSolidAngle = True,
+#                                        polarization_factor = 1,
+#                                        mask = maskImage,
+#                                        unit = "q_A^-1")
+#            q, self.total.s_raw[:,i] = self.AIGeometry.ai.medfilt1d(image, nqpt,
+#                                        percentile = 50,
+#                                        correctSolidAngle = True,
+#                                        polarization_factor = 1,
+#                                        mask = maskImage,
+#                                        unit = "q_A^-1")
+            s_raw_phi, q, phi = self.AIGeometry.ai.integrate2d(image, nqpt, npt_azim = 512, 
+                                                                    radial_range = qRange, 
+                                                                    correctSolidAngle = True, 
+                                                                    mask=maskImage,
+                                                                    polarization_factor = 1,
+                                                                    unit = "q_A^-1")
+            self.total.s_raw[:,i] = np.mean(getMedianSelection(s_raw_phi.T, 0.96), axis=1)
+            
             intTime = time.clock() - startIntTime
             print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
             idxIm += 1
@@ -136,7 +155,7 @@ class ScatData:
                                                         q[qNormRangeSel])
             self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
             self.imageAv += image
-#            if idxIm>6:
+#            if idxIm>1:
 #                break
             
         print('*** Integration done ***')
@@ -145,14 +164,20 @@ class ScatData:
         self.imageAv[maskImage==1] = 0
         self.imageAv_int = np.mean(self.total.s_raw, axis=1)
         print('*** Integration quality check ***')
-        self.imageAv_int_phiSlices = self.AIGeometry.ai.integrate2d(self.imageAv, nqpt, npt_azim = 36, 
+        self.imageAv_int_phiSlices = self.AIGeometry.ai.integrate2d(self.imageAv, nqpt, npt_azim = 360, 
                                                                     radial_range = qRange, 
                                                                     correctSolidAngle = True, 
                                                                     mask=maskImage,
                                                                     polarization_factor = 1,
                                                                     unit = "q_A^-1")
+        self.imageAv_med = self.AIGeometry.ai.medfilt1d(self.imageAv, nqpt, 
+                                                                    percentile = (0,99),
+                                                                    correctSolidAngle = True, 
+                                                                    mask=maskImage,
+                                                                    polarization_factor = 1,
+                                                                    unit = "q_A^-1")
         if plotting:
-            plt.figure()
+            plt.figure(figsize=(12,12))
             plt.clf()
             
             plt.subplot(221)
@@ -177,6 +202,7 @@ class ScatData:
             plt.ylabel('Intensity, a.u.')
             plt.title('All integrated curves (normalized)')
   
+    
     
     def getAIGeometry(self, energy, distance, pixelSize, centerX, centerY, qRange, nqpt, qNormRange):
         wavelen = 12.3984/energy*1e-10 # in m
@@ -229,9 +255,37 @@ class ScatData:
         for t in timeStamp_str:
             timeStamp.append(datetime.strptime(t,'%d-%b-%y %H:%M:%S').timestamp())
         timeStamp = np.array(timeStamp)
+        timeStamp_str = np.array(timeStamp_str)
         return timeStamp, timeStamp_str    
     
+
+
+# 2. Total outlier rejection
+        
     
+    
+    def identifyTotalOutliers(self, fraction=0.9, chisqThresh=5, q_break=None, chisqThresh_lowq=5, chisqThresh_highq=5, plotting=True, chisqHistMax = 10):
+        self.total.isOutlier, chisqTot, chisqTot_lowq, chisqTot_highq = identifyOutliers(self.q, self.total.s, 
+                                                                                         fraction, 
+                                                                                         chisqThresh, 
+                                                                                         q_break, 
+                                                                                         chisqThresh_lowq, 
+                                                                                         chisqThresh_highq)
+        if plotting:
+            plt.figure(figsize = (12,6))
+            plt.clf()
+            nsubs = 1
+            subidx = 0
+            plotOutliers(nsubs, subidx, self.q, self.total.s, self.total.isOutlier, 
+                         chisqTot, chisqThresh,
+                         q_break, chisqTot_lowq, chisqThresh_lowq, chisqTot_highq, chisqThresh_highq,
+                         chisqHistMax)
+            
+            
+                
+# 3. Difference calculation
+
+
     
     def getDifferences(self, toff_str = '-5us', subtractFlag = 'MovingAverage'):
         
@@ -240,6 +294,8 @@ class ScatData:
         stampDiff = self.total.timeStamp[np.newaxis].T-self.total.timeStamp
         stampDiff[stampDiff==0] = stampDiff.max()
         stampDiff[:, self.total.delay_str!=toff_str] = stampDiff.max()
+        stampDiff[:, self.total.isOutlier] = stampDiff.max()
+        stampDiff[self.total.isOutlier, :] = stampDiff.max()
         mapDiff = np.eye(stampDiff.shape[0])
         
         if subtractFlag == 'Closest':
@@ -250,14 +306,13 @@ class ScatData:
         elif subtractFlag == 'MovingAverage':
             stampThresh = np.median(np.diff(self.total.timeStamp[self.total.delay_str == toff_str]))*1.1
             offsTBS = np.abs(stampDiff)<stampThresh
-            mapDiff = self.getWeights(self.total.timeStamp, offsTBS, mapDiff)
+            mapDiff = getWeights(self.total.timeStamp, offsTBS, mapDiff)
         
         elif subtractFlag == 'Previous':
             stampDiff[stampDiff<0] = stampDiff.max()
             offsTBS = np.argmin(np.abs(stampDiff), axis=1)
             mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
             mapDiff = np.tril(mapDiff)
-            mapDiff = mapDiff[np.sum(mapDiff, axis=1)==0,:]
             
         elif subtractFlag == 'Next':
             stampDiff[stampDiff>0] = stampDiff.max()
@@ -265,8 +320,8 @@ class ScatData:
             offsTBS = np.argmin(np.abs(stampDiff), axis=1)
             mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
             mapDiff = np.triu(mapDiff)
-            mapDiff = mapDiff[np.sum(mapDiff, axis=1)==0,:]
-        
+            
+        mapDiff = mapDiff[(np.abs(np.sum(mapDiff, axis=1))<1e-4) & ( ~self.total.isOutlier),:]
         idxDiff = np.where(mapDiff==1)[1]
         
         self.diff.mapDiff = mapDiff
@@ -274,24 +329,45 @@ class ScatData:
         self.diff.delay = self.total.delay[idxDiff]
         self.diff.delay_str = self.total.delay_str[idxDiff]
         self.diff.timeStamp = self.total.timeStamp[idxDiff]
-        self.diff.timeStamp_str = [self.total.timeStamp_str[i] for i in idxDiff] # ... indexing of lists is such a pain ...
-        self.diff.t = self.total.t
-        self.diff.t_str = self.total.t_str
+#        self.diff.timeStamp_str = [self.total.timeStamp_str[i] for i in idxDiff] # ... indexing of lists is such a pain ...
+        self.diff.timeStamp_str = self.total.timeStamp_str[idxDiff]
+        self.diff.t = np.unique(self.diff.delay)
+        self.diff.t_str = np.unique(self.diff.delay_str)
+        self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)
+
+
+
+    def getDiffAverages(self, fraction=0.9, chisqThresh=1.5, q_break=None, chisqThresh_lowq=1.5, chisqThresh_highq=1.5, plotting=True, histBins = 10):
+        self.diff.ds_av = np.zeros((self.q.size, self.diff.t.size))
+        self.diff.ds_err = np.zeros((self.q.size, self.diff.t.size))
+        if plotting:
+            nsubs = A.diff.t_str.size
+            plt.figure(figsize = (nsubs*3,6))
+            plt.clf()
         
-#        plt.subplot(221)
-#        plt.plot(self.q, self.total.s_raw)
-#        
-#        plt.subplot(222)
-#        plt.plot(self.q, self.total.s)
-#        
-#        plt.subplot(223)
-#        plt.imshow(self.diff.mapDiff)
-#        
-#        plt.subplot(224)
-#        plt.plot(self.q, self.diff.ds)
+        for i, t_point in enumerate(A.diff.t_str):
+            delay_selection = A.diff.delay_str==t_point
+            ds_loc = self.diff.ds[:, delay_selection]
+            isOutlier_loc, chisqDiff, chisqDiff_lowq, chisqDiff_highq = identifyOutliers(self.q, ds_loc, fraction, chisqThresh, 
+                                                                                         q_break, chisqThresh_lowq, chisqThresh_highq)
+            self.diff.isOutlier[delay_selection] = isOutlier_loc
+            self.diff.ds_av[:,i] = np.mean(ds_loc[:,isOutlier_loc], axis = 1)
+            self.diff.ds_err[:,i] = np.std(ds_loc[:,isOutlier_loc], axis = 1)/np.sqrt(np.sum(isOutlier_loc))
+            
+            if plotting:
+                subidx = i
+                plotOutliers(nsubs, subidx, self.q, ds_loc, isOutlier_loc, 
+                             chisqDiff, chisqThresh,
+                             q_break, chisqDiff_lowq, chisqThresh_lowq, chisqDiff_highq, chisqThresh_highq,
+                             histBins)
+
+
+        
+
+#%% Auxillary functions
         
         
-        
+
 def getWeights(timeStamp, offsTBS, mapDiff):
     # auxillary function 
     for i, stampOn in enumerate(timeStamp):
@@ -310,19 +386,7 @@ def getWeights(timeStamp, offsTBS, mapDiff):
 
 
 
-def getMedianSelection(x_orig, frac):
-    x = x_orig.copy()
-    x = np.sort(x, axis=1)
-    nrows = x.shape[1]
-    low = np.int(np.round((1-frac)/2*nrows))
-    high = np.int(np.round((1+frac)/2*nrows))
-#    print(low, high)
-    x = x[:,low:high]
-    return x                    
-
-
-    
-def identifyOutliers(q_orig, x_orig, fraction = 0.9, chisqThresh = 5, q_break = None, chisqThresh_lowq = 5, chisqThresh_highq = 5):
+def identifyOutliers(q_orig, x_orig, fraction, chisqThresh, q_break, chisqThresh_lowq, chisqThresh_highq):
     q = q_orig.copy()
     x = x_orig.copy()
 
@@ -334,12 +398,77 @@ def identifyOutliers(q_orig, x_orig, fraction = 0.9, chisqThresh = 5, q_break = 
     if not q_break:
         chisq = np.nansum(errsq, axis=0)
         isOutlier = chisq>chisqThresh
+        chisq_lowq = None
+        chisq_highq = None
     else:
-        chisq_lowq = np.nansum(errsq[q<=q_break,:], axis=0)
+        chisq_lowq = np.nansum(errsq[q<q_break,:], axis=0)
         chisq_highq = np.nansum(errsq[q>=q_break,:], axis=0)
-        isOutlier = (chisq_lowq>chisqThresh_lowq) & (chisq_highq>chisqThresh_highq)
+        isOutlier = (chisq_lowq>=chisqThresh_lowq) | (chisq_highq>=chisqThresh_highq)
+        chisq = None
         
-    return isOutlier
+    return isOutlier, chisq, chisq_lowq, chisq_highq
+
+
+
+def getMedianSelection(x_orig, frac):
+    x = x_orig.copy()
+    x = np.sort(x, axis=1)
+    ncols = x.shape[1]
+    low = np.int(np.round((1-frac)/2*ncols))
+    high = np.int(np.round((1+frac)/2*ncols))
+#    print(low, high)
+    x = x[:,low:high]
+    return x  
+
+
+
+def plotOutliers(nsubs, subidx, q, x, isOutlier, chisq, chisqThresh, q_break, chisq_lowq, chisqThresh_lowq, chisq_highq, chisqThresh_highq, chisqHistMax):
+    plt.subplot(nsubs,2, subidx*2+1)
+    if any(isOutlier):
+        plt.plot(q, x[:, isOutlier], 'b-')
+    if any(~isOutlier):
+        plt.plot(q, x[:,~isOutlier], 'k-')
+        x_mean = np.mean(x[:,~isOutlier], axis=1)
+        plt.plot(q, x_mean,'r')
+#        plt.ylim(x_mean.min(), x_mean.max())
+    plt.xlabel('q, A^-1')
+    plt.ylabel('Intentsity, a.u.')
+#    plt.legend('Outliers','Accepted Data')
+
+    chisqBins = np.concatenate((np.arange(0,4,0.5), np.arange(4,chisqHistMax+0.5,0.5), np.array(np.inf)[np.newaxis]))
+    chisqWidths = np.diff(chisqBins)
+    chisqWidths[-1] = 1
+    if not q_break:
+        heights,_ = np.histogram(chisq, bins=chisqBins)
+        
+        plt.subplot(nsubs,2,subidx*2+2)
+        plt.bar(chisqBins[:-1], heights, width=chisqWidths, align='edge')
+        plt.plot(chisqThresh*np.array([1,1]), plt.ylim(),'k-')
+        plt.xlabel('\chi^2')
+        plt.ylabel('n. occurances')
+        
+    else:
+        heights_lowq,_ = np.histogram(chisq_lowq, bins=chisqBins)
+        heights_highq,_ = np.histogram(chisq_highq, bins=chisqBins)
+    
+        plt.subplot(nsubs*2,2,subidx*4+2)
+        plt.bar(chisqBins[:-1], heights_lowq, width=chisqWidths, align='edge')
+        plt.plot(chisqThresh_lowq*np.array([1,1]), plt.ylim())
+        plt.xlabel('\chi_lowq^2')
+        plt.ylabel('n. occurances')
+        
+        plt.subplot(nsubs*2,2,subidx*4+4)
+        plt.bar(chisqBins[:-1], heights_highq, width=chisqWidths, align='edge')
+        plt.plot(chisqThresh_highq*np.array([1,1]), plt.ylim())
+        plt.xlabel('\chi_highq^2')
+        plt.ylabel('n. occurances')
+
+
+
+                  
+
+
+    
     
 #%%        
 # Dirty Checking: integration
@@ -356,38 +485,19 @@ A.integrate(energy = 11.63,
             nqpt=400,
             qNormRange = [1.9,2.1],
             maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf')
-##%%
-## idnetify outliers in total curves
-#A.identifyTotalOutliers(fraction = 0.9)
-#
-##%% difference calculation
-#A.getDifferences(toff_str = '-5us', 
-#                 subtractFlag = 'Previous')
+#%%
+# idnetify outliers in total curves
+A.identifyTotalOutliers(fraction=0.9, chisqThresh=5)
 
-##%%
-#
-#[histVals, histEdges] = np.histogram(np.ravel(A.imageAv),1000)
-#histBins = histEdges[0:-1] + np.diff(histEdges)
-#
-#cumsumVal = np.cumsum(histVals)
-#cumsumVal = cumsumVal/cumsumVal.max()
-#
-#histThresh = histBins[np.argmin(np.abs(cumsumVal-(1-1e-4)))]
-#
-#plt.figure(1)
-#plt.clf()
-#plt.subplot(211)
-#plt.plot(histBins[1:], histVals[1:])
-#plt.plot([histThresh, histThresh], plt.ylim())
-#plt.xlim([100, 3500])
-#
-#plt.subplot(223)
-#plt.plot(histBins, cumsumVal)
-#plt.plot(histBins[cumsumVal<0.99], cumsumVal[cumsumVal<0.99],'r-')
-#
-#plt.subplot(224)
-#plt.imshow(A.imageAv, vmin=histThresh-1, vmax=histThresh+1)
-#
+#%% difference calculation
+A.getDifferences(toff_str = '-5us', 
+                 subtractFlag = 'MovingAverage')
+
+#%%
+
+#A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
+A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
+
 
 #%%
 #ds_av = np.zeros((A.AIGeometry.nqpt, A.diff.t.size))
