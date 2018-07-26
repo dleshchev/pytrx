@@ -27,6 +27,7 @@ import pyFAI
 import fabio
 
 from matplotlib import pyplot as plt
+from scipy.ndimage import median_filter
 
 class ScatData:
     '''
@@ -61,7 +62,7 @@ class ScatData:
             filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
             if not Path(filePath).is_file():
                 idxToDel.append(i)
-                print(filePath, ' does not exist')
+                print(filePath, ' does not exist and therefore is out of the analysis')
         self.logData = self.logData.drop(idxToDel)
         
         # get the number of time delays and number of files
@@ -99,11 +100,14 @@ class ScatData:
 
 
         
-    def integrate(self, energy=12, distance=365, pixelSize=80e-6, centerX=1900, centerY=1900, qRange=[0.0,4.0], nqpt=400, qNormRange=[1.9,2.1], maskPath=None, plotting = True):
+    def integrate(self, energy=12, distance=365, pixelSize=80e-6, centerX=1900, centerY=1900, qRange=[0.0,4.0], 
+                  nqpt=400, qNormRange=[1.9,2.1], maskPath=None, dezinger=False, plotting = True):
         self.getAIGeometry(energy, distance, pixelSize, centerX, centerY, qRange, nqpt, qNormRange)
         if maskPath:
             assert Path(maskPath).is_file(), maskPath+' file (mask) not found'
             maskImage = fabio.open(maskPath).data
+        else:
+            maskImage = None
 
         self.total = namedtuple('total','s s_raw normInt delay delay_str t t_str timeStamp timeStamp_str scanStamp imageAv isOutlier')        
         nFiles = self.logData.shape[0]        
@@ -126,35 +130,26 @@ class ScatData:
             image = fabio.open(path).data
             readTime = time.clock() - startReadTime
             startIntTime = time.clock()
-#            q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(image, nqpt,
-#                                        radial_range = qRange,
-#                                        correctSolidAngle = True,
-#                                        polarization_factor = 1,
-#                                        mask = maskImage,
-#                                        unit = "q_A^-1")
-#            q, self.total.s_raw[:,i] = self.AIGeometry.ai.medfilt1d(image, nqpt,
-#                                        percentile = 50,
-#                                        correctSolidAngle = True,
-#                                        polarization_factor = 1,
-#                                        mask = maskImage,
-#                                        unit = "q_A^-1")
-            s_raw_phi, q, phi = self.AIGeometry.ai.integrate2d(image, nqpt, npt_azim = 512, 
-                                                                    radial_range = qRange, 
-                                                                    correctSolidAngle = True, 
-                                                                    mask=maskImage,
-                                                                    polarization_factor = 1,
-                                                                    unit = "q_A^-1")
-            self.total.s_raw[:,i] = np.mean(getMedianSelection(s_raw_phi.T, 0.96), axis=1)
-            
+            if dezinger:
+                image = medianDezinger(image, maskImage)
+                
+            q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(image, nqpt,
+                                                                      radial_range = qRange,
+                                                                      correctSolidAngle = True,
+                                                                      polarization_factor = 1,
+                                                                      mask = maskImage,
+                                                                      unit = "q_A^-1")
             intTime = time.clock() - startIntTime
-            print('Integration of image', idxIm, '(of', nFiles, ') took', '%.0f' % (intTime*1e3), 'ms of which', '%.0f' % (readTime*1e3), 'ms was spent on readout')
-            idxIm += 1
-        
+            
             qNormRangeSel = (q>=qNormRange[0]) & (q<=qNormRange[1])
             self.total.normInt[i] = np.trapz(self.total.s_raw[qNormRangeSel,i], 
                                                         q[qNormRangeSel])
             self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
             self.imageAv += image
+            print(idxIm, ')' , row['file'], ':',
+                 'readout: %.0f' % (readTime*1e3), 'ms; integration: %.0f' % (intTime*1e3), 'ms; total: %.0f' % ((intTime+readTime)*1e3), 'ms')
+            idxIm += 1
+
 #            if idxIm>1:
 #                break
             
@@ -162,40 +157,35 @@ class ScatData:
         self.q = q
         self.imageAv = self.imageAv/(idxIm-1)
         self.imageAv[maskImage==1] = 0
-        self.imageAv_int = np.mean(self.total.s_raw, axis=1)
-        print('*** Integration quality check ***')
-        self.imageAv_int_phiSlices = self.AIGeometry.ai.integrate2d(self.imageAv, nqpt, npt_azim = 360, 
-                                                                    radial_range = qRange, 
-                                                                    correctSolidAngle = True, 
-                                                                    mask=maskImage,
-                                                                    polarization_factor = 1,
-                                                                    unit = "q_A^-1")
-        self.imageAv_med = self.AIGeometry.ai.medfilt1d(self.imageAv, nqpt, 
-                                                                    percentile = (0,99),
-                                                                    correctSolidAngle = True, 
-                                                                    mask=maskImage,
-                                                                    polarization_factor = 1,
-                                                                    unit = "q_A^-1")
+        self.imageAv_int = np.sum(self.total.s_raw, axis=1)/(idxIm-1)
+        self.imageAv_int_phiSlices, phi, _ = self.AIGeometry.ai.integrate2d(self.imageAv, nqpt, npt_azim = 360, 
+                                                                            radial_range = qRange, 
+                                                                            correctSolidAngle = True, 
+                                                                            mask=maskImage,
+                                                                            polarization_factor = 1,
+                                                                            unit = "q_A^-1")
+        self.imageAv_int_phiSlices[self.imageAv_int_phiSlices==0] = np.nan
+        
         if plotting:
             plt.figure(figsize=(12,12))
             plt.clf()
-            
+            vmin, vmax = (self.imageAv_int[self.imageAv_int!=0].min(), self.imageAv_int.max())
             plt.subplot(221)
-            plt.imshow(self.imageAv)
+            plt.imshow(self.imageAv, vmin=vmin, vmax=vmax)
             plt.title('Average image')
             plt.subplot(222)
-            plt.plot(self.q, self.imageAv_int_phiSlices[0].T)
+            plt.plot(self.q, self.imageAv_int_phiSlices.T)
             plt.plot(self.q, self.imageAv_int,'r.-')
             plt.xlabel('q, A^-1')
             plt.ylabel('Intensity, counts')
             plt.title('Integrated average & sliced integrated average')
-#            
+            
             plt.subplot(223)
             plt.plot(self.q, self.total.s_raw)
             plt.xlabel('q, A^-1')
             plt.ylabel('Intensity, counts')
             plt.title('All integrated curves')
-#            
+            
             plt.subplot(224)
             plt.plot(self.q, self.total.s)
             plt.xlabel('q, A^-1')
@@ -323,9 +313,12 @@ class ScatData:
             
         mapDiff = mapDiff[(np.abs(np.sum(mapDiff, axis=1))<1e-4) & ( ~self.total.isOutlier),:]
         idxDiff = np.where(mapDiff==1)[1]
+        ds = np.dot(mapDiff,self.total.s.T).T
+        
+        
         
         self.diff.mapDiff = mapDiff
-        self.diff.ds = np.dot(mapDiff,self.total.s.T).T
+        self.diff.ds = ds
         self.diff.delay = self.total.delay[idxDiff]
         self.diff.delay_str = self.total.delay_str[idxDiff]
         self.diff.timeStamp = self.total.timeStamp[idxDiff]
@@ -367,6 +360,28 @@ class ScatData:
 #%% Auxillary functions
         
         
+
+def medianDezinger(img_orig, mask):
+    img = img_orig.copy()
+    img_blur = median_filter(img, size=(3,3))
+    img_diff = (img.astype(float)-img_blur.astype(float))
+    threshold = np.std(img_diff[mask.astype(bool)])*10
+    hot_pixels = np.abs(img_diff)>threshold
+    hot_pixels[mask.astype(bool)] = 0
+    img[hot_pixels] = img_blur[hot_pixels]
+    
+#    x,y = np.nonzero(hot_pixels)
+    
+#    plt.figure(1)
+#    plt.clf()
+#    plt.imshow(img, vmin = 0, vmax = 3500)
+#    plt.plot(y,x,'r.')
+##    plt.ylim(1750,1769)
+##    plt.xlim(770,795)
+##    plt.imshow(hot_pixels)
+    
+    return img
+
 
 def getWeights(timeStamp, offsTBS, mapDiff):
     # auxillary function 
@@ -470,21 +485,24 @@ def plotOutliers(nsubs, subidx, q, x, isOutlier, chisq, chisqThresh, q_break, ch
 
     
     
-#%%        
+#%%
+if __name__ == '__main__':
 # Dirty Checking: integration
-A = ScatData(logFile = 'D:\\leshchev_1708\\Ubiquitin\\45.log',
-             dataInDir = 'D:\\leshchev_1708\\Ubiquitin\\',
-             dataOutDir = 'D:\\leshchev_1708\\Ubiquitin\\')
-          
-A.integrate(energy = 11.63,
-            distance = 364,
-            pixelSize = 82e-6,
-            centerX = 1987,
-            centerY = 1965,
-            qRange = [0.0, 4.0],
-            nqpt=400,
-            qNormRange = [1.9,2.1],
-            maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf')
+    A = ScatData(logFile = 'D:\\leshchev_1708\\Ubiquitin\\45.log',
+                 dataInDir = 'D:\\leshchev_1708\\Ubiquitin\\',
+                 dataOutDir = 'D:\\leshchev_1708\\Ubiquitin\\')
+              
+    A.integrate(energy = 11.63,
+                distance = 364,
+                pixelSize = 82e-6,
+                centerX = 1987,
+                centerY = 1965,
+                qRange = [0.0, 4.0],
+                nqpt = 400,
+                qNormRange = [1.9,2.1],
+                maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf',
+                dezinger=True,
+                plotting=False)
 #%%
 # idnetify outliers in total curves
 A.identifyTotalOutliers(fraction=0.9, chisqThresh=5)
@@ -495,8 +513,8 @@ A.getDifferences(toff_str = '-5us',
 
 #%%
 
-#A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
-A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
+A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
+#A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
 
 
 #%%
@@ -544,6 +562,27 @@ A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_hig
 #plt.plot(s1,'r')
 
 
+#%%
+    
+
+#    
+#img = A.imageAv
+#
+#img_blur = median_filter(img, size=2)
+#img_diff = (img-img_blur)
+#threshold = np.std(img_diff)*10
+#
+#hot_pixels = np.abs(img_diff)>threshold
+#
+#plt.figure(3)
+#plt.clf()
+##plt.imshow(img, vmin = 100, vmax = 2400)
+##plt.imshow(img_blur, vmin = 100, vmax = 2400)
+#plt.imshow(np.abs(img_diff), vmin = 0, vmax = 100)
+##plt.hist(np.ravel(img_diff),100)
+#
+#    
+    
 #%%
 #
 #def hampel(vals_orig, k=7, t0=3):
