@@ -32,48 +32,51 @@ import fabio
 
 class ScatData:
     
-    ''' This is a class for processing, storage and readout of time resolved
+    ''' This is a class for processing, storage and loading of time resolved
         x-ray scattering data. The methods invoked during the workflow update the
         attributes of the class instead of just providing returned values. This
         might seem a bit counter-intuitive, but this approach results in a 
         convenient handling of multiple datasets in a uniform fashion down the
         line during the analysis.
         
-        The workflow is as follows:
-            
-        0. Declare the object (ex: A) where you want to store everything and
-        provide it with information on log data, input directory and output
-        directory. The initiation of the object will assert the correctness of 
-        the input to reduce the number of bugs down the line.
+        The workflow:
         
-        1. Integrate the scattering images by using A.integrate(<parameters>)
-        method which requires you to declare the experimental geometry. This will
+        0. Declare the data object:
+        A = ScatData(<parameters>*)
+            
+        Provide the class with information on log data, input directory and output
+        directory. The initiation of the object will assert the correctness of 
+        the input to reduce the number of bugs down the line. For details see
+        self.__init__ docstring.
+        
+        1. Integrate the scattering images:
+        A.integrate(<parameters>)
+        Provide the method with the experimental geometry details. This will
         give you a named tuple A.total.<data> that contains integrated scattering
         data.
         
-        2. Remove nasty outliers by using A.identifyTotalOutliers(<parameters>)
-        from total scattering originating from bubbles, hair in the air, and other
-        issues in the experimental setup. This will give you a flag array
-        A.total.isOurlier that will indicate which curves will not be used to
-        calculate differences or for any other analysis.
+        2. Identify nasty outliers and get total scattering averages: 
+        A.getTotalAverages(<parameters>)
+        Provide the method with rejection thresholds to obtain
+        averaged curves. This method also marks the total curves that will not be
+        used for calculation of averages or differences down the line.
+        NB: For non-time-resolved data, you can stop here and do the analysis
+        you want to perform.
         
-        NB: For static data (not time-resolved), you can stop here and do the 
-        analysis you want to perform.
+        3. Calculate differences:
+        A.getDifferences(<parameters>)
+        This method updates the A.diff.<data> with difference data calculated
+        according to provided parameters.
         
-        3. Calculate differences by using A.getDifferences(<parameters>). This
-        method updates the A.diff.<data>; the curves marked as A.total.isOutlier
-        are not used in the difference calculation. Unlike in previous versions
-        (for instance, in Matlab), to get differences we generate a mapDiff.
-        This matrix helps to visualize how we calculate differences and also 
-        allows to optimize the way we calculate them.
-        
-        4. Calculate average differences by using A.getDiffAverages(<parameters>).
+        4. Calculate average differences:
+        A.getDiffAverages(<parameters>)
+        Provide the method with rejection thresholds.
         
         5. Save data using A.saveData(<parameters>). *in progress*
         
         6. Load data using A.loadData(<parameters>). *in progress*
         
-        *to see the meaning of <data> and <parameters> refer to methods' docstrings.
+        *to see the meaning of <parameters> refer to methods' docstrings.
     '''
     
     def __init__(self, logFile = None, dataInDir = None, dataOutDir = None):
@@ -96,10 +99,12 @@ class ScatData:
         # check if input is correct:
         self._assertCorrectInput(logFile, dataInDir, dataOutDir) 
        
-        # read the log data into logData pandas table and update it with storage details
+        # read the log data into logData pandas table and update it with
+        # storage details
         if isinstance(logFile ,str):
             self.logData = pd.read_csv(logFile, sep = '\t', header = 18)
-            self.logData['Scan'] = ntpath.splitext(ntpath.basename(logFile))[0] # scan name without extension
+            # assign scan name without file extension
+            self.logData['Scan'] = ntpath.splitext(ntpath.basename(logFile))[0]
             self.logData['dataInDir'] = dataInDir
             self.logData.rename(columns = {'#date time':'date time'},
                                 inplace = True)
@@ -235,6 +240,9 @@ class ScatData:
         # Do the procedure!
         print('*** Integration ***')
         for i, row in self.logData.iterrows():
+            ######### debugging comment:
+#            if i>0:
+#                break
             impath = row['dataInDir'] + row['file']
             startReadTime = time.clock()         
             image = fabio.open(impath).data
@@ -264,10 +272,6 @@ class ScatData:
                  'readout: %.0f' % (readTime*1e3),
                  'ms | integration: %.0f' % (intTime*1e3),
                  'ms | total: %.0f' % ((intTime+readTime)*1e3), 'ms')
-
-############ debugging comment:
-#            if i>1:
-#                break
             
         print('*** Integration done ***')
         self.q = q
@@ -319,8 +323,8 @@ class ScatData:
 
     def _getAIGeometry(self, energy, distance, pixelSize, centerX, centerY,
                       qRange, nqpt, qNormRange):
-        '''Method for storing the geometry parameters from the input to 
-        self.integrate() method.
+        '''Method for storing the geometry parameters in self.AIGeometry from
+        the input to self.integrate() method.
         '''
         wavelen = 12.3984/energy*1e-10 # in m
         self.AIGeometry = namedtuple('AIGeometry', 'ai nqpt qRange qNormRange')
@@ -377,11 +381,31 @@ class ScatData:
     def getTotalAverages(self, fraction=0.9, chisqThresh=5,
                               q_break=None, chisqThresh_lowq=5, chisqThresh_highq=5,
                               plotting=True, chisqHistMax=10):
+        ''' Method calculates the total averages and gets rid of nasty outliers.
+        It uses a chisq-based method for detecting outliers (see getAverage aux
+        method).
+        
+        You need:
+        fraction - amount of data used for getting the effective average/std to detect
+        outliers. By default it is 0.9 which means that the average/std are calculated
+        using data between 0.05 and 0.95 percentiles.
+        
+        chisqThresh - Threshold value of chisq, above which the data will be marked
+        as ourtliers.
+        
+        q_break - in case if you want to have a separate diagnostics for small and
+        high q values, you can use q_break.
+        chisqThresh_lowq - Threshold for chisq calculated for q<q_break
+        chisqThresh_highq - Threshold for chisq calculated for q>=q_break
+        
+        plotting - True if you want to see the results of the outlier rejection
+        chisqHistMax - maximum value of chisq you want to plot histograms
+        '''
         self.total.s_av, self.total.s_err, self.total.isOutlier = \
-        getAverage(self.q, self.total.delay_str, self.total.s, self.total.t_str,
-                   fraction, chisqThresh,
-                   q_break, chisqThresh_lowq, chisqThresh_highq,
-                   plotting, chisqHistMax)
+          getAverage(self.q, self.total.delay_str, self.total.s, self.total.t_str,
+                     fraction, chisqThresh,
+                     q_break, chisqThresh_lowq, chisqThresh_highq,
+                     plotting, chisqHistMax)
 
 
 
@@ -389,44 +413,122 @@ class ScatData:
 
 
     
-    def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage'):
+    def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage',
+                       stampThreshFactor = 1.1):
+        ''' Method for calculating differences.
         
-        self.diff = namedtuple('differnces', 'mapDiff ds delay delay_str timeStamp timeStamp_str t t_str ')
-
+        You will need:
+        toff_str - time delay which you use for subtraction
+        subtractFlag - the way you want to calculate the differences. It can have
+        following values:
+                'MovingAverage' - calculates a weighted average between (at most)
+                                  two closest reference curves. This combined curve
+                                  is used to calculate differences.
+                'Closest'       - calculates difference using the closest
+                                  reference curve.
+                'Previous'      - uses previous reference curve.
+                'Next'          - uses next reference curve.
+        stampThreshFactor - multiplier for identifying closest laser-off (or   
+        other reference curves). This is only used in 'MovingAverage' subtraction.
+        To identify closest reference curves, the algorithm calculates the median
+        laboratory time spend between two reference images and multiplies it by
+        stampThreshFactor to ensure that the closest will be always chosen for any
+        given image. This value should be between 1 and 2; for 99% of the cases,
+        1.1 will work fine.
+        NB: the difference calculation ignores curves marked True in
+        self.total.isOutlier
+        
+        The method updates/adds following fields:
+        self.diff.mapDiff - matrix used to calculate differences. It is very
+                        useful to see which total curves were used for
+                        calculation of a specific diffference. Each column
+                        corresponds to the total curve used for subtraction.
+                        Each row corresponds to the difference curve obtained
+                        in the end. Sum of all the values in each row should be 0.
+                  ds - difference curves
+                  delay - delay (in s)
+                  delay_str - delay (string format)
+                  timeStamp - when the (laser-on) image was measured (epoch)
+                  timeStamp_str - the same as timeStamp, but in string format
+                  t - unique time delays in s
+                  t_str - unique time delays in string format
+                  isOutlier - this is the flag for outliers for *differences*. At
+                        this point the isOutlier is an array of Falses, because
+                        no rejection has been implented yet
+        '''
+        # declaration of the tuple
+        self.diff = namedtuple('differnces', 'mapDiff ds delay delay_str '
+                               'timeStamp timeStamp_str t t_str ')
+        
+        # this section will be thoroughly commented as it is a bit non-trivial
+        # calculation of the timeStamp difference matrix:
         stampDiff = self.total.timeStamp[np.newaxis].T-self.total.timeStamp
+        # avoid self-subtraction:
         stampDiff[stampDiff==0] = stampDiff.max()
+        # avoid subtraction of non-reference curves
         stampDiff[:, self.total.delay_str!=toff_str] = stampDiff.max()
+        # avoid using total outliers for difference calculation:
         stampDiff[:, self.total.isOutlier] = stampDiff.max()
         stampDiff[self.total.isOutlier, :] = stampDiff.max()
+        
+        # declare intial difference map yet to be filled with -1s:
         mapDiff = np.eye(stampDiff.shape[0])
         
-        if subtractFlag == 'Closest':
-            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
-            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
-            mapDiff = mapDiff[sympy.Matrix(mapDiff).T.rref()[1],:]
-        
-        elif subtractFlag == 'MovingAverage':
-            stampThresh = np.median(np.diff(self.total.timeStamp[self.total.delay_str == toff_str]))*1.1
+        if subtractFlag == 'MovingAverage':
+            # determine the average laboratory time between taking two
+            # reference images:
+            stampThresh = np.median(np.diff(
+                self.total.timeStamp[self.total.delay_str == toff_str]))
+            # multiply it by a factor between 1 and 2 to ensure that all
+            # reference curves will be taken into account correctly:
+            stampThresh *= stampThreshFactor
+            # find reference (laser-off) curves to be suntracted (TBS):
             offsTBS = np.abs(stampDiff)<stampThresh
+            # get weighting factors for the closest reference curves:
             mapDiff = getWeights(self.total.timeStamp, offsTBS, mapDiff)
         
+        elif subtractFlag == 'Closest':
+            # find closest reference (laser-off) curves TBS:
+            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
+            # assign corresponding indeces in mapDiff to -1
+            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
+            # After the previous line you will have some duplicates among
+            # reference curves. For example, if you have two reference curves,
+            # lets call them 1 and 2, you will have two entries in the difference
+            # map, whcih will subtract 1 from 2 and 2 from 1. To avoit these
+            # duplicates, we search for linearly dependent lines in mapDiff and
+            # remove them like so:
+            mapDiff = mapDiff[sympy.Matrix(mapDiff).T.rref()[1],:]
+        
         elif subtractFlag == 'Previous':
+            # make sure that the next reference curves will not be used for
+            # calculation:
             stampDiff[stampDiff<0] = stampDiff.max()
             offsTBS = np.argmin(np.abs(stampDiff), axis=1)
             mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
+            # due to the ways the .max() works, we need to clean-up the upper
+            # triangle of the matrix:
             mapDiff = np.tril(mapDiff)
             
         elif subtractFlag == 'Next':
+            # make sure that the previous reference curves will not be used for
+            # calculation:
             stampDiff[stampDiff>0] = stampDiff.max()
             stampDiff = np.abs(stampDiff)
             offsTBS = np.argmin(np.abs(stampDiff), axis=1)
             mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
+            # clean-up:
             mapDiff = np.triu(mapDiff)
-            
+        else:
+            raise ValueError('subtractFlag should be one of the following:'
+                             'MovingAverage, Closest, Previous, or Next')
+        # final clean-up of the mapDiff: all the lines that do not have a 0 sum,
+        # (i.e. do not map differences), as well as outliers, are removed
         mapDiff = mapDiff[(np.abs(np.sum(mapDiff, axis=1))<1e-4) & ( ~self.total.isOutlier),:]
+        # find indeces of the curves FROM which reference were subtracted:
         idxDiff = np.where(mapDiff==1)[1]
         ds = np.dot(mapDiff,self.total.s.T).T
-        
+        # Fill in all the necessary fields:
         self.diff.mapDiff = mapDiff
         self.diff.ds = ds
         self.diff.delay = self.total.delay[idxDiff]
@@ -446,6 +548,10 @@ class ScatData:
     def getDiffAverages(self, fraction=0.9, chisqThresh=1.5,
                         q_break=None, chisqThresh_lowq=1.5, chisqThresh_highq=1.5,
                         plotting=True, chisqHistMax = 10):
+        ''' Method to get average differences. It works in the same way as
+        getTotalAverages, so refer to the information on input/output in the
+        getTotalAverages docstring.
+        '''
         self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier = \
         getAverage(self.q, self.diff.delay_str, self.diff.ds, self.diff.t_str,
                    fraction, chisqThresh,
@@ -456,34 +562,46 @@ class ScatData:
         
 
 #%% Auxillary functions
-        
+# This functions are put outside of the class as they can be used in broader
+# contexts and such implementation simplifies access to them.
         
 
 def medianDezinger(img_orig, mask):
+    ''' Function for image dezingering.
+    
+    You need:
+        img_orig - the image you want to dezinger
+        mask - the mask for this image (can be None)
+    
+    Output:
+        img - dezingered image
+    '''
     img = img_orig.copy()
     img_blur = median_filter(img, size=(3,3))
     img_diff = (img.astype(float)-img_blur.astype(float))
-    threshold = np.std(img_diff[mask.astype(bool)])*10
-    hot_pixels = np.abs(img_diff)>threshold
-    hot_pixels[mask.astype(bool)] = 0
+    if ~mask:
+        threshold = np.std(img_diff[mask.astype(bool)])*10
+        hot_pixels = np.abs(img_diff)>threshold
+        hot_pixels[mask.astype(bool)] = 0
+    else:
+        threshold = np.std(img_diff)*10
+        hot_pixels = np.abs(img_diff)>threshold
     img[hot_pixels] = img_blur[hot_pixels]
-    
+    return img
 #    x,y = np.nonzero(hot_pixels)
-    
 #    plt.figure(1)
 #    plt.clf()
-#    plt.imshow(img, vmin = 0, vmax = 3500)
-#    plt.plot(y,x,'r.')
-##    plt.ylim(1750,1769)
+#    plt.imshow(np.abs(img_diff), vmin = -10, vmax = 80, cmap='Blues')
+#    plt.plot(y,x,'r.', ms=3)
+#    plt.ylim(np.array([1,397])+1000)
+#    plt.xlim(np.array([1,1584])+1000)
 ##    plt.xlim(770,795)
 ##    plt.imshow(hot_pixels)
-    
-    return img
 
 
 
 def time_str2num(t_str):
-    ''' Method for converting time delay strings to numerical format (in s)
+    ''' Function for converting time delay strings to numerical format (in s)
         Input: time delay string
         Output: time in s
     '''
@@ -504,7 +622,15 @@ def time_str2num(t_str):
 
 
 def getWeights(timeStamp, offsTBS, mapDiff):
-    # auxillary function 
+    ''' Function which calculates weights for the next and previous reference
+    curves.
+    
+    If the given curve is measured at time t_k, the previous reference
+    curve is measured at t_i, and the next is measured at t_j, then the weight
+    for the *previous* is abs(t_k-t_j)/abs(t_i-t_j) while for the *next* one
+    the weight is abs(t_k-t_i)/abs(t_i-t_j). This way the largest weight is 
+    given to the reference curve that is closer in time to the k-th curve.
+    '''
     for i, stampOn in enumerate(timeStamp):
         offsTBS_loc = offsTBS[i,:]
         stampOffs = timeStamp[offsTBS_loc]
@@ -516,7 +642,8 @@ def getWeights(timeStamp, offsTBS, mapDiff):
             weights = -(stampDiffs/stampRange)[::-1]
             mapDiff[i,offsTBS_loc] = weights
         else:
-            raise ValueError('Variable stampThresh is too large. Decrease the multiplication factor.')
+            raise ValueError('Variable stampThresh is too large. '
+                             'Decrease the multiplication factor.')
     return mapDiff
 
 
@@ -525,7 +652,9 @@ def getAverage(q, delay_str, x, t_str,
                fraction, chisqThresh,
                q_break, chisqThresh_lowq, chisqThresh_highq,
                plotting, chisqHistMax):
-    
+    ''' Function for calculating averages and standard errors of data sets.
+    For details see ScatData.getTotalAverages method docstring.
+    '''
     x_av = np.zeros((q.size, t_str.size))
     x_err = np.zeros((q.size, t_str.size))
     isOutlier = np.zeros(delay_str.size, dtype=bool)
@@ -541,8 +670,8 @@ def getAverage(q, delay_str, x, t_str,
                 identifyOutliers(q, x_loc, fraction, chisqThresh, 
                                  q_break, chisqThresh_lowq, chisqThresh_highq)
         isOutlier[delay_selection] = isOutlier_loc
-        x_av[:,i] = np.mean(x_loc[:,isOutlier_loc], axis = 1)
-        x_err[:,i] = np.std(x_loc[:,isOutlier_loc], axis = 1)/np.sqrt(np.sum(isOutlier_loc))
+        x_av[:,i] = np.mean(x_loc[:,~isOutlier_loc], axis = 1)
+        x_err[:,i] = np.std(x_loc[:,~isOutlier_loc], axis = 1)/np.sqrt(np.sum(~isOutlier_loc))
         
         if plotting:
             subidx = i
@@ -558,13 +687,44 @@ def getAverage(q, delay_str, x, t_str,
 
 def identifyOutliers(q_orig, y_orig, fraction, chisqThresh,
                      q_break, chisqThresh_lowq, chisqThresh_highq):
+    ''' Function for identification of outliers in a given data set.
+    
+    The function calculates the average and the standard deviation using fraction
+    of the data (see below) and uses these values to evaluate chisq for each curve
+    in the given data like so:
+        for k-th curve chisq_k = sum_q ((y_k-y_av)/(y_std))**2
+    if the chisq_k is larger than chisqThresh, then the curve is deemed outlier.
+    
+    Sometimes one needs to evaluate outliers across different q-regions and to do
+    so one needs to introduce q_break. Then the above sum splits into:
+        chisq_lowq_k = sum_(q<q_break) ((y_k-y_av)/(y_std))**2
+        chisq_highq_k = sum_(q>=q_break) ((y_k-y_av)/(y_std))**2
+    To find outliers the function evaluates whether any of chisq_lowq_k or
+    chisq_highq_k are higher than chisqThresh_lowq or chisqThresh_highq, respectively.
+    
+    You will need:
+        q_orig - q values of the data
+        y_orig - data with axis=0 in q space
+        fraction - fraction of the data you want to use to calculate trial average
+            and deviation. If it is 0.5, these values will be calculated using the
+            curves between 0.25 and 0.75 percentiles.
+        chisqThresh - threshold chisq value, above which the data is deemed to be
+            outlier.
+        q_break - value determening the regions where chisq_lowq and chisq_highq
+            will be evaluated.
+        chisqThresh_lowq, chisqThresh_highq - chisq threshold values for low and
+            high q parts of the data.
+    '''
     q = q_orig.copy()
     y = y_orig.copy()
 
     ySel = getMedianSelection(y, fraction)
     ySel_av = np.mean(ySel, axis = 1)
     ySel_std = np.std(ySel, axis = 1)
-    errsq = ((y - ySel_av[:,np.newaxis])/ySel_std[:,np.newaxis])**2/q.size
+    nnzStd = ySel_std!=0
+    errsq = ((y[nnzStd,:] - ySel_av[nnzStd,np.newaxis])/
+              ySel_std[nnzStd,np.newaxis])**2/q.size
+    q_errsq = q[nnzStd]
     
     if not q_break:
         chisq = np.nansum(errsq, axis=0)
@@ -572,8 +732,8 @@ def identifyOutliers(q_orig, y_orig, fraction, chisqThresh,
         chisq_lowq = None
         chisq_highq = None
     else:
-        chisq_lowq = np.nansum(errsq[q<q_break,:], axis=0)
-        chisq_highq = np.nansum(errsq[q>=q_break,:], axis=0)
+        chisq_lowq = np.nansum(errsq[q_errsq<q_break,:], axis=0)
+        chisq_highq = np.nansum(errsq[q_errsq>=q_break,:], axis=0)
         isOutlier = (chisq_lowq>=chisqThresh_lowq) | (chisq_highq>=chisqThresh_highq)
         chisq = None
         
@@ -582,12 +742,15 @@ def identifyOutliers(q_orig, y_orig, fraction, chisqThresh,
 
 
 def getMedianSelection(z_orig, frac):
+    ''' Function to get selection of data from symmetric percentiles determined
+    by fraction. For example if fraction is 0.9, then the output data is the
+    selection between 0.05 and 0.95 percentiles.
+    '''
     z = z_orig.copy()
     z = np.sort(z, axis=1)
     ncols = z.shape[1]
     low = np.int(np.round((1-frac)/2*ncols))
     high = np.int(np.round((1+frac)/2*ncols))
-#    print(low, high)
     z = z[:,low:high]
     return z
 
@@ -598,13 +761,15 @@ def plotOutliers(nsubs, subidx,
                  chisqThresh, q_break,
                  chisq_lowq, chisqThresh_lowq, chisq_highq, chisqThresh_highq,
                  chisqHistMax):
+    ''' Fucntion to plot data and corresponding chisq histograms.
+    '''
     plt.subplot(nsubs,2, subidx*2+1)
     if any(isOutlier):
         plt.plot(q, x[:, isOutlier], 'b-')
     if any(~isOutlier):
         plt.plot(q, x[:,~isOutlier], 'k-')
         x_mean = np.mean(x[:,~isOutlier], axis=1)
-        plt.plot(q, x_mean,'r')
+        plt.plot(q, x_mean,'r.')
 #        plt.ylim(x_mean.min(), x_mean.max())
     plt.xlabel('q, A^-1')
     plt.ylabel('Intentsity, a.u.')
@@ -664,8 +829,7 @@ if __name__ == '__main__':
                 maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf',
                 dezinger=False,
                 plotting=True)
-#%%
-# idnetify outliers in total curves
+#%% idnetify outliers in total curves
 A.getTotalAverages(fraction=0.9, chisqThresh=6)
 
 #%% difference calculation
@@ -674,8 +838,8 @@ A.getDifferences(toff_str = '-5us',
 
 #%%
 
-#A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
-A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
+A.getDiffAverages(fraction=0.9, chisqThresh=0.5)
+#A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
 
 
 #%%
