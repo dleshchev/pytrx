@@ -4,7 +4,7 @@ Created on Thu May 24 20:48:14 2018
 
 scatdata - a module for performing scattering data reduction. It is primarily
 intended to be used for BioCARS (APS) data. It is comprised of a class for reduction, 
-storage and reading of scattering data and a set of auxillary functions.
+storage and reading of scattering data, and a set of auxillary functions.
 See class description to follow the workflow, as well as method docstrings to
 understand input/output.
 
@@ -12,7 +12,8 @@ understand input/output.
 
 todo:
 
-- add threshFactor keyarg to getDifferences method
+- make nicer visualizations
+- add read/load methods
 
 """
 from pathlib import Path
@@ -26,6 +27,7 @@ import pandas as pd
 import sympy
 from matplotlib import pyplot as plt
 from scipy.ndimage import median_filter
+import scipy.signal as signal
 
 import pyFAI
 import fabio
@@ -41,8 +43,8 @@ class ScatData:
         
         The workflow:
         
-        0. Declare the data object:
-        A = ScatData(<parameters>*)
+        0. Declare the data object (ex: A):
+        A = ScatData(<parameters*>)
             
         Provide the class with information on log data, input directory and output
         directory. The initiation of the object will assert the correctness of 
@@ -249,8 +251,7 @@ class ScatData:
             readTime = time.clock() - startReadTime
             
             startIntTime = time.clock()
-            if dezinger:
-                image = medianDezinger(image, maskImage)
+            if dezinger: image = medianDezinger(image, maskImage)
             q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(
                                                     image,
                                                     nqpt,
@@ -268,10 +269,10 @@ class ScatData:
             intTime = time.clock() - startIntTime
             
             print(i+1, '|',
-                 row['file'], ':',
-                 'readout: %.0f' % (readTime*1e3),
-                 'ms | integration: %.0f' % (intTime*1e3),
-                 'ms | total: %.0f' % ((intTime+readTime)*1e3), 'ms')
+                  row['file'], ':',
+                  'readout: %.0f' % (readTime*1e3),
+                  'ms | integration: %.0f' % (intTime*1e3),
+                  'ms | total: %.0f' % ((intTime+readTime)*1e3), 'ms')
             
         print('*** Integration done ***')
         self.q = q
@@ -401,6 +402,7 @@ class ScatData:
         plotting - True if you want to see the results of the outlier rejection
         chisqHistMax - maximum value of chisq you want to plot histograms
         '''
+        print('*** Averaging the total curves ***')
         self.total.s_av, self.total.s_err, self.total.isOutlier = \
           getAverage(self.q, self.total.delay_str, self.total.s, self.total.t_str,
                      fraction, chisqThresh,
@@ -414,7 +416,7 @@ class ScatData:
 
     
     def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage',
-                       stampThreshFactor = 1.1):
+                       stampThreshFactor=1.1, dezinger=True):
         ''' Method for calculating differences.
         
         You will need:
@@ -430,11 +432,17 @@ class ScatData:
                 'Next'          - uses next reference curve.
         stampThreshFactor - multiplier for identifying closest laser-off (or   
         other reference curves). This is only used in 'MovingAverage' subtraction.
-        To identify closest reference curves, the algorithm calculates the median
-        laboratory time spend between two reference images and multiplies it by
-        stampThreshFactor to ensure that the closest will be always chosen for any
-        given image. This value should be between 1 and 2; for 99% of the cases,
-        1.1 will work fine.
+        To identify closest reference curves, the algorithm calculates the typical
+        laboratory time between two references. With this number it finds the
+        references that are within the given time window and uses those to calculate
+        the difference. To get the typical time it calculates the median of
+        laboratory times spent between to ref. images and multiples is by 
+        stampThreshFactor, which ensures that all the closest reference images will
+        be used. Note that this approach also ensures that the images taken in
+        different scans will not be intermixed (as long as number of ref images
+        exceed the number of scans, which is usually true). The stampThreshFactor
+        should be between 1 and 2; for 99% of the cases, 1.1 will work just fine.
+        
         NB: the difference calculation ignores curves marked True in
         self.total.isOutlier
         
@@ -456,6 +464,7 @@ class ScatData:
                         this point the isOutlier is an array of Falses, because
                         no rejection has been implented yet
         '''
+        print('*** Calculating the difference curves ***')
         # declaration of the tuple
         self.diff = namedtuple('differnces', 'mapDiff ds delay delay_str '
                                'timeStamp timeStamp_str t t_str ')
@@ -528,6 +537,11 @@ class ScatData:
         # find indeces of the curves FROM which reference were subtracted:
         idxDiff = np.where(mapDiff==1)[1]
         ds = np.dot(mapDiff,self.total.s.T).T
+        # 1d dezingering:
+        if dezinger:
+            for i,_ in enumerate(ds.T):
+                ds[:,i] = medianDezinger1d(ds[:,i])
+        
         # Fill in all the necessary fields:
         self.diff.mapDiff = mapDiff
         self.diff.ds = ds
@@ -552,14 +566,18 @@ class ScatData:
         getTotalAverages, so refer to the information on input/output in the
         getTotalAverages docstring.
         '''
+        print('*** Averaging the difference curves ***')
         self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier = \
         getAverage(self.q, self.diff.delay_str, self.diff.ds, self.diff.t_str,
                    fraction, chisqThresh,
                    q_break, chisqThresh_lowq, chisqThresh_highq,
                    plotting, chisqHistMax)
+        print('*** Processing done ***')
 
 
         
+
+
 
 #%% Auxillary functions
 # This functions are put outside of the class as they can be used in broader
@@ -588,16 +606,34 @@ def medianDezinger(img_orig, mask):
         hot_pixels = np.abs(img_diff)>threshold
     img[hot_pixels] = img_blur[hot_pixels]
     return img
-#    x,y = np.nonzero(hot_pixels)
-#    plt.figure(1)
-#    plt.clf()
-#    plt.imshow(np.abs(img_diff), vmin = -10, vmax = 80, cmap='Blues')
-#    plt.plot(y,x,'r.', ms=3)
-#    plt.ylim(np.array([1,397])+1000)
-#    plt.xlim(np.array([1,1584])+1000)
-##    plt.xlim(770,795)
-##    plt.imshow(hot_pixels)
 
+
+
+def medianDezinger1d(x_orig, fraction=0.9, kernel_size=5, thresh=5):
+    ''' Function for dezingering 1D curves using median filter.
+    
+    You need:
+        x_orig - 1D curve
+        fraction - fraction of data used for calculation of STD (default=0.9)
+        kernel_size - kernel size for median filtering (default=5)
+        thresh - STD multiplier for determination of the filtering threshold (default=5)
+        
+    Output:
+        x - dezingered data
+    '''
+    x = x_orig.copy()
+    idx_nnz = x!=0
+    x_nnz = x[idx_nnz]
+    x_nnz_filt = signal.medfilt(x_nnz, kernel_size=kernel_size)
+    dx = x_nnz - x_nnz_filt
+    dx_sel = getMedianSelection(dx[dx!=0][np.newaxis], fraction)
+    threshold = np.std(dx_sel)*thresh
+    hot_pixels = np.abs(dx)>threshold
+    x_nnz_dez = x_nnz
+    x_nnz_dez[hot_pixels] = x_nnz_filt[hot_pixels]
+    x[idx_nnz] = x_nnz_dez
+    return x
+    
 
 
 def time_str2num(t_str):
@@ -813,7 +849,7 @@ def plotOutliers(nsubs, subidx,
     
 #%%
 if __name__ == '__main__':
-# Dirty Checking: integration
+    # Dirty Checking: integration
     A = ScatData(logFile = 'D:\\leshchev_1708\\Ubiquitin\\45.log',
                  dataInDir = 'D:\\leshchev_1708\\Ubiquitin\\',
                  dataOutDir = 'D:\\leshchev_1708\\Ubiquitin\\')
@@ -829,151 +865,16 @@ if __name__ == '__main__':
                 maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf',
                 dezinger=False,
                 plotting=True)
-#%% idnetify outliers in total curves
-A.getTotalAverages(fraction=0.9, chisqThresh=6)
-
-#%% difference calculation
-A.getDifferences(toff_str = '-5us', 
-                 subtractFlag = 'MovingAverage')
-
-#%%
-
-A.getDiffAverages(fraction=0.9, chisqThresh=0.5)
-#A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
-
-
-#%%
-#ds_av = np.zeros((A.AIGeometry.nqpt, A.diff.t.size))
-#ds_err = np.zeros(ds_av.shape)
-#
-#chisqThresh = 1
-#for i, t_point in enumerate(A.diff.t_str):
-#    ds_loc = A.diff.ds[:, A.diff.delay_str==t_point]
-#    ds_loc_med = np.median(ds_loc, axis = 1)
-##    ds_loc_med = np.mean(ds_loc, axis = 1)
-#    ds_loc_std = np.std(ds_loc, axis = 1)
-#    errsq = ((ds_loc - ds_loc_med[:,np.newaxis])/ds_loc_std[:,np.newaxis])**2
-#    chisqOut = np.nansum(errsq, axis=0)/A.AIGeometry.nqpt
-#    selectedCurves = chisqOut<chisqThresh
-#    ds_loc_sel = ds_loc[:, selectedCurves]
-#    ds_av[:,i] = np.mean(ds_loc_sel, axis = 1)
-#    ds_err[:,i] = np.std(ds_loc_sel, axis = 1)/np.sqrt(np.sum(selectedCurves))
-#    
-#plt.figure(1)
-#plt.clf()
-#
-#plt.subplot(121)
-##plt.plot(A.q, ds_loc, 'b-')
-##plt.plot(A.q, ds_loc_sel, 'k-')
-#plt.plot(A.q, ds_err[:,1], 'r-')
-#
-#plt.subplot(122)
-#plt.hist(chisqOut,20)
-#
-##s = A.total.s
-#idx = 20
-
-
-#%%
-
-#s = A.diff.ds[:,A.diff.delay>0]
-#
-#
-#
-#s1 = getMedianSelection(s, frac = 0.9)
-#plt.figure(1)
-#plt.clf()
-#plt.plot(s,'k')
-#plt.plot(s1,'r')
-
-
-#%%
+    #%% idnetify outliers in total curves
+    A.getTotalAverages(fraction=0.9, chisqThresh=6)
     
-
-#    
-#img = A.imageAv
-#
-#img_blur = median_filter(img, size=2)
-#img_diff = (img-img_blur)
-#threshold = np.std(img_diff)*10
-#
-#hot_pixels = np.abs(img_diff)>threshold
-#
-#plt.figure(3)
-#plt.clf()
-##plt.imshow(img, vmin = 100, vmax = 2400)
-##plt.imshow(img_blur, vmin = 100, vmax = 2400)
-#plt.imshow(np.abs(img_diff), vmin = 0, vmax = 100)
-##plt.hist(np.ravel(img_diff),100)
-#
-#    
+    #%% difference calculation
+    A.getDifferences(toff_str = '-5us', 
+                     subtractFlag = 'MovingAverage',
+                     dezinger=True)
     
-#%%
-#
-#def hampel(vals_orig, k=7, t0=3):
-#    '''
-#    vals: pandas series of values from which to remove outliers
-#    k: size of window (including the sample; 7 is equal to 3 on either side of value)
-#    '''
-#    #Make copy so original not edited
-#    vals=vals_orig.copy()
-#    vals = pd.DataFrame(vals)
-#    vals = vals[vals!=0]
-#    
-#    #Hampel Filter
-#    L= 1.4826
-#    rolling_median = vals.rolling(k, center=True, min_periods=1).median()
-#    difference = np.abs(rolling_median-vals)
-#    median_abs_deviation = difference.rolling(k, center=True, min_periods=1).median()
-#    threshold= t0 *L * median_abs_deviation
-#    outlier_idx = difference>threshold
-##    vals[outlier_idx] = np.nan
-#    vals[outlier_idx] = rolling_median[outlier_idx]
-#    return(vals)
-#
-#
-#
-#s1 = hampel(s[:,idx])
-#
-#sdiff = np.diff(s[:,idx])
-#s1diff = hampel(sdiff)
-#
-###%%
-##s1 = s[:].copy()
-##
-##s1 = pd.DataFrame(s1)
-##k=27
-##t0=3
-##L=1.4826
-##
-##s1 = s1[s1>0]
-##rolling_median = s1.rolling(k, center=True).median()
-##difference = np.abs(rolling_median-s1)
-##median_abs_deviation = difference.rolling(k, center=True, min_periods=1).median()
-##threshold= t0 *L * median_abs_deviation
-##outlier_idx = difference>threshold
-##s2 = s1.copy()
-##s2[outlier_idx] = rolling_median[outlier_idx]
-##
-##
-##plt.figure(1)
-##plt.clf()
-##plt.plot(np.diff(s1, axis=0))
-##plt.plot(rolling_median,'.-')
-##plt.plot(difference)
-##plt.plot(median_abs_deviation)
-#
-##plt.plot(s1[outlier_idx],'rx')
-###plt.plot(s2)
-###plt.plot(median_abs_deviation)
-##
-###%%
-#plt.figure(1)
-#plt.clf()
-##plt.plot(s[:,idx])
-##plt.plot(s1)
-#plt.plot(sdiff)
-#plt.plot(s1diff)
-#
-#
-#
+    #%%
+    
+    A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
+    #A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
+    
