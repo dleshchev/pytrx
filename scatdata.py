@@ -34,7 +34,7 @@ import fabio
 
 class ScatData:
     
-    ''' This is a class for processing, storage and loading of time resolved
+    ''' This is a class for processing, storage, and loading of time resolved
         x-ray scattering data. The methods invoked during the workflow update the
         attributes of the class instead of just providing returned values. This
         might seem a bit counter-intuitive, but this approach results in a 
