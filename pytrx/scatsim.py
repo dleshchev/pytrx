@@ -10,6 +10,7 @@ from itertools import islice
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import pkg_resources
 
 class molecular_structure:
     
@@ -130,16 +131,19 @@ class molecular_structure:
         
         # The most modern and advanced parameterization of f0 form factors is
         # given by WaasKirf file.
-        fname = 'f0_WaasKirf.dat'
-#        fname = 'f0_CromerMann.dat'
+        # fname = 'f0_WaasKirf.dat'
+#        fname = './pytrx/f0_CromerMann.dat'
         
         # This is a functional form for this parameterization
         formFunc = lambda s,a: np.sum(np.reshape(a[:5],[5,1])*np.exp(-a[6:,np.newaxis]*s**2),axis=0)+a[5]
-#        formFunc = lambda s,a: np.sum(np.reshape(a[:4],[4,1])*np.exp(-a[5:,np.newaxis]*s**2),axis=0)+a[4]        
-        
+		
+        fname = pkg_resources.resource_filename('pytrx', './f0_WaasKirf.dat')
+#        print(f)
         with open(fname) as f:
             content = f.readlines()    
-        # Read the coefficients for the calculation:
+#        content = f.readlines()
+        
+		# Read the coefficients for the calculation:
         atomData = list()
         for i,x in enumerate(content):
             if x[0:2]=='#S':
