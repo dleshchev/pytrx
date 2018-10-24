@@ -81,8 +81,10 @@ class ScatData:
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
     
-    def __init__(self, logFile = None, dataInDir = None, dataOutDir = None):
+    def __init__(self, logFile=None, dataInDir=None, dataOutDir=None,
+                 logFileStyle='biocars', ignoreFirst=False, nImages=None):
         ''' To initialize the class, you will need:
+            
             logFile - name of the log file. Should be a string or a list of
             strings. Should contain ".log" extension.
             dataInDir - name of the directory which contains data. Should be a
@@ -91,6 +93,11 @@ class ScatData:
             this argument should be a list of strings, ordered in the same way
             as logFile list.
             dataOutDir - name of the output directory. Always a string.
+            logFileStyle - style of logFile set to 'biocars' by default. Other
+            possible value is 'id09'.
+            ignoreFirst - if True, the log reader will remove first image from
+            each run frim the data analysis.
+            nImages - number of images you want to integrate in each run.
             
             The initialization adds a logData attribute (self.logData), which 
             is a pandas table containing all the log information.
@@ -99,35 +106,46 @@ class ScatData:
             unique time delays were measured in a given data set.
         '''
         # check if input is correct:
-        self._assertCorrectInput(logFile, dataInDir, dataOutDir) 
-       
-        # read the log data into logData pandas table and update it with
-        # storage details
+        self._assertCorrectInput(logFile, dataInDir, dataOutDir, logFileStyle) 
+        
         if isinstance(logFile ,str):
-            self.logData = pd.read_csv(logFile, sep = '\t', header = 18)
-            # assign scan name without file extension
-            self.logData['Scan'] = ntpath.splitext(ntpath.basename(logFile))[0]
-            self.logData['dataInDir'] = dataInDir
-            self.logData.rename(columns = {'#date time':'date time'},
-                                inplace = True)
-        else: # if the log data is a list, we need a bit of handling:
-            logDataAsList = []
-            for i,item in enumerate(logFile):
+            logFile = [logFile] # convert to list for smooth handling
+ 
+        logDataAsList = []
+        for i,item in enumerate(logFile):
+            if logFileStyle == 'biocars':
                 logDataAsList.append(pd.read_csv(item, sep = '\t', header = 18))
-                logDataAsList[i]['Scan'] = ntpath.splitext(ntpath.basename(item))[0]
-                if isinstance(dataInDir ,str):
-                    logDataAsList[i]['dataInDir'] = dataInDir
-                else:
-                    logDataAsList[i]['dataInDir'] = dataInDir[i]
-            self.logData = pd.concat(logDataAsList, ignore_index=True)
+                logDataAsList[i].rename(columns = {'#date time':'date time'}, inplace = True)
+            elif logFileStyle == 'id09':
+                id09_columns = _get_id09_columns()
+                logDataAsList.append(pd.read_csv(item, skiprows=1, skipfooter=1, sep='\t',
+                                                 engine='python', names=id09_columns,
+                                                 skipinitialspace=True))
+                logDataAsList[i]['date time'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
+                
+            
+            if ignoreFirst:
+                logDataAsList[i] = logDataAsList[i][1:]
+            if nImages:
+                logDataAsList[i] = logDataAsList[i][:nImages]
+                
+            logDataAsList[i]['Scan'] = ntpath.splitext(ntpath.basename(item))[0]
+            if isinstance(dataInDir ,str):
+                logDataAsList[i]['dataInDir'] = dataInDir
+            else:
+                logDataAsList[i]['dataInDir'] = dataInDir[i]
+        
+        self.logData = pd.concat(logDataAsList, ignore_index=True)
                 
         # clean logData from files that do not exist for whatever reason
         idxToDel = []
         for i, row in self.logData.iterrows():
+            if logFileStyle == 'id09':
+                self.logData.loc[i,'file'] = self.logData.loc[i,'file'].replace('ccdraw','edf')
             filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
             if not Path(filePath).is_file():
                 idxToDel.append(i)
-                print(filePath, ' does not exist and therefore is out of the analysis')
+                print(filePath, 'does not exist and therefore will be excluded from analysis')
         self.logData = self.logData.drop(idxToDel)
         
         # print out the number of time delays and number of files
@@ -139,7 +157,7 @@ class ScatData:
 
 
 
-    def _assertCorrectInput(self, logFile, dataInDir, dataOutDir):
+    def _assertCorrectInput(self, logFile, dataInDir, dataOutDir, logFileStyle):
         ''' This method asserts the right input according to the logic described
         in __init__ method.
         '''
@@ -169,6 +187,9 @@ class ScatData:
         assert isinstance(dataOutDir, str), \
         'provide data output directory as a string'
         assert Path(dataOutDir).is_dir(), 'output directory not found'
+        
+        assert (logFileStyle == 'biocars') or (logFileStyle == 'id09'), \
+        'logFileStyle can be either "biocars" or "id09"'
 
 
 
@@ -179,7 +200,7 @@ class ScatData:
     def integrate(self, energy=12, distance=365, pixelSize=80e-6,
                   centerX=1900, centerY=1900, qRange=[0.0,4.0], nqpt=400, 
                   qNormRange=[1.9,2.1], maskPath=None,
-                  dezinger=False, plotting = True):
+                  dezinger=False, plotting=True, nMax=None):
         ''' This method integrates images given the geometry parameters.
             
             You will need:
@@ -196,6 +217,8 @@ class ScatData:
             use masks! To produce mask you can use pyFAI drawMask tool.
             dezinger - whether you want to dezinger images  (boolean)
             plotting - whether you want to plot the output results (boolean)
+            nMax - number of Images you want to integrate. All imges will be 
+            integrates if nMax is None.
             
             Output:
             self.q - transferred momentum in A^{-1}
@@ -242,9 +265,6 @@ class ScatData:
         # Do the procedure!
         print('*** Integration ***')
         for i, row in self.logData.iterrows():
-            ######### debugging comment:
-#            if i>0:
-#                break
             impath = row['dataInDir'] + row['file']
             startReadTime = time.clock()         
             image = fabio.open(impath).data
@@ -273,6 +293,10 @@ class ScatData:
                   'readout: %.0f' % (readTime*1e3),
                   'ms | integration: %.0f' % (intTime*1e3),
                   'ms | total: %.0f' % ((intTime+readTime)*1e3), 'ms')
+            
+            if nMax:
+                if (i+1) >= nMax:
+                    break
             
         print('*** Integration done ***')
         self.q = q
@@ -349,10 +373,17 @@ class ScatData:
             time delays in numerical and string formats. This is done for
             the readability of the code  in the main function.
         '''
-        delay_str = self.logData['delay'].tolist()
-        delay = []
-        for t_str in delay_str:
-            delay.append(time_str2num(t_str))            
+        if isinstance(self.logData['delay'][0], str):
+            delay_str = self.logData['delay'].tolist()
+            delay = []
+            for t_str in delay_str:
+                delay.append(time_str2num(t_str))            
+        elif isinstance(self.logData['delay'][0], float):
+            delay = self.logData['delay'].tolist()
+            delay_str = []
+            for t in delay:
+                delay_str.append(time_num2str(t))           
+        
         delay_str = np.array(delay_str)
         delay = np.array(delay)
         return delay, delay_str
@@ -493,6 +524,7 @@ class ScatData:
             stampThresh *= stampThreshFactor
             # find reference (laser-off) curves to be suntracted (TBS):
             offsTBS = np.abs(stampDiff)<stampThresh
+            print('stampThresh =', stampThresh)
             # get weighting factors for the closest reference curves:
             mapDiff = getWeights(self.total.timeStamp, offsTBS, mapDiff)
         
@@ -504,7 +536,7 @@ class ScatData:
             # After the previous line you will have some duplicates among
             # reference curves. For example, if you have two reference curves,
             # lets call them 1 and 2, you will have two entries in the difference
-            # map, whcih will subtract 1 from 2 and 2 from 1. To avoit these
+            # map, whcih will subtract 1 from 2 and 2 from 1. To avoid these
             # duplicates, we search for linearly dependent lines in mapDiff and
             # remove them like so:
             mapDiff = mapDiff[sympy.Matrix(mapDiff).T.rref()[1],:]
@@ -583,6 +615,14 @@ class ScatData:
 # This functions are put outside of the class as they can be used in broader
 # contexts and such implementation simplifies access to them.
         
+        
+def _get_id09_columns():
+    id09_columns = ['date', 'time', 'file',
+                    'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max',
+                    'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
+                    'xray',  'xray_std',  'xray_min',  'xray_max',  'xray_n',
+                    'n_pulses']
+    return id09_columns
 
 def medianDezinger(img_orig, mask):
     ''' Function for image dezingering.
@@ -657,6 +697,29 @@ def time_str2num(t_str):
 
 
 
+def time_num2str(t):
+    ''' Function for converting time delays to string format
+        Input: time delay in s
+        Output: time string
+    '''
+    A = np.log10(np.abs(t))
+    if (A < -12):
+        t_str = str(round(t*1e15)) + 'fs'
+    elif (A >= -12) and (A < -9):
+        t_str = str(round(t*1e12)) + 'ps'
+    elif (A >= -9) and (A < -6):
+        t_str = str(round(t*1e9)) + 'ns'
+    elif (A >= -6) and (A < -3):
+        t_str = str(round(t*1e6)) + 'us'
+    elif (A >= -3) and (A < 0):
+        t_str = str(round(t*1e3)) + 'ms'
+    else:
+        t_str = str(int(t))
+    return t_str
+    
+
+
+
 def getWeights(timeStamp, offsTBS, mapDiff):
     ''' Function which calculates weights for the next and previous reference
     curves.
@@ -671,13 +734,18 @@ def getWeights(timeStamp, offsTBS, mapDiff):
         offsTBS_loc = offsTBS[i,:]
         stampOffs = timeStamp[offsTBS_loc]
         stampRange = np.diff(stampOffs)
-        if stampRange.size==0:
+        if stampRange.size == 0:
             mapDiff[i,offsTBS_loc] = -1
-        elif stampRange.size==1:
+        elif stampRange.size == 1:
             stampDiffs = abs(stampOn - stampOffs)
             weights = -(stampDiffs/stampRange)[::-1]
             mapDiff[i,offsTBS_loc] = weights
         else:
+            print('Cannot compute difference for', i, 'curve')
+            print('diagnostics: i:', i, '; stampOn:', stampOn,
+                  '; stampOffs:', stampOffs,
+                  '; stampDiffs:', abs(stampOn - stampOffs),
+                  '; offs TBS: ', np.where(offsTBS_loc))
             raise ValueError('Variable stampThresh is too large. '
                              'Decrease the multiplication factor.')
     return mapDiff
