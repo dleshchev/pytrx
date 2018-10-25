@@ -11,7 +11,7 @@ understand input/output.
 @author: Denis Leshchev
 
 todo:
-
+- add renormalization option for difference calculation
 - more elaborate summary output
 - each visualization should be a separate function
 - visualization of outlier rejection should be decluttered
@@ -34,6 +34,7 @@ import time
 
 import pyFAI
 import fabio
+
 
 class ScatData:
     
@@ -153,10 +154,17 @@ class ScatData:
         
         # print out the number of time delays and number of files
         self.nFiles = len(self.logData['delay'].tolist())
-        self.nDelays = len(np.unique(self.logData['delay'].tolist()))
+        delays, delays_str = self._getDelays()
+        delays_str_unique = np.unique(delays_str)
+        delays_str_unique = delays_str_unique[np.argsort(
+                np.array([time_str2num(i) for i in delays_str_unique]))]
+        self.nDelays = len(delays_str_unique)
         print('Successful initialization:')
         print('Found %s files' % self.nFiles)
         print('Found %s time delays' % self.nDelays)
+        print('delay \t # files')
+        for d in delays_str_unique:
+            print(d, '\t', np.sum(delays_str==d))
 
 
 
@@ -261,8 +269,7 @@ class ScatData:
         self.total.t_str = np.unique(self.total.delay_str)
         self.total.timeStamp, self.total.timeStamp_str = self._getTimeStamps()
         self.total.scanStamp = np.array(self.logData['Scan'].tolist())
-        self.imageAv = np.zeros(maskImage.shape)
-        self.isOutlier = np.zeros(self.nFiles, dtype = bool)
+        self.total.isOutlier = np.zeros(self.nFiles, dtype = bool)
         
         # Do the procedure!
         print('*** Integration ***')
@@ -441,7 +448,7 @@ class ScatData:
                      fraction, chisqThresh,
                      q_break, chisqThresh_lowq, chisqThresh_highq,
                      plotting, chisqHistMax)
-
+        print('*** Done ***')
 
 
 # 3. Difference calculation
