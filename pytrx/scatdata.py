@@ -12,7 +12,9 @@ understand input/output.
 
 todo:
 
-- make nicer visualizations
+- more elaborate summary output
+- each visualization should be a separate function
+- visualization of outlier rejection should be decluttered
 - add read/load methods
 
 """
@@ -28,6 +30,7 @@ import sympy
 from matplotlib import pyplot as plt
 from scipy.ndimage import median_filter
 import scipy.signal as signal
+import time
 
 import pyFAI
 import fabio
@@ -149,11 +152,11 @@ class ScatData:
         self.logData = self.logData.drop(idxToDel)
         
         # print out the number of time delays and number of files
-        nFiles = len(self.logData['delay'].tolist())
-        nDelays = len(np.unique(self.logData['delay'].tolist()))
+        self.nFiles = len(self.logData['delay'].tolist())
+        self.nDelays = len(np.unique(self.logData['delay'].tolist()))
         print('Successful initialization:')
-        print('Found %s files' % nFiles)
-        print('Found %s time delays' % nDelays)
+        print('Found %s files' % self.nFiles)
+        print('Found %s time delays' % self.nDelays)
 
 
 
@@ -250,17 +253,16 @@ class ScatData:
         # Declaration of all the necessary attributes/fields:
         self.total = namedtuple('total','s s_raw normInt delay delay_str t t_str '
                                 'timeStamp timeStamp_str scanStamp imageAv isOutlier')
-        nFiles = self.logData.shape[0]
-        self.total.s = np.zeros([nqpt, nFiles])
-        self.total.s_raw = np.zeros([nqpt, nFiles])
-        self.total.normInt = np.zeros(nFiles)
+        self.total.s = np.zeros([nqpt, self.nFiles])
+        self.total.s_raw = np.zeros([nqpt, self.nFiles])
+        self.total.normInt = np.zeros(self.nFiles)
         self.total.delay, self.total.delay_str = self._getDelays()
         self.total.t = np.unique(self.total.delay)
         self.total.t_str = np.unique(self.total.delay_str)
         self.total.timeStamp, self.total.timeStamp_str = self._getTimeStamps()
         self.total.scanStamp = np.array(self.logData['Scan'].tolist())
         self.imageAv = np.zeros(maskImage.shape)
-        self.isOutlier = np.zeros(nFiles, dtype = bool)
+        self.isOutlier = np.zeros(self.nFiles, dtype = bool)
         
         # Do the procedure!
         print('*** Integration ***')
@@ -446,8 +448,8 @@ class ScatData:
 
 
     
-    def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage',
-                       stampThreshFactor=1.1, dezinger=True):
+    def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage', 
+                       dezinger=True):
         ''' Method for calculating differences.
         
         You will need:
@@ -460,31 +462,13 @@ class ScatData:
                 'Closest'       - calculates difference using the closest
                                   reference curve.
                 'Previous'      - uses previous reference curve.
-                'Next'          - uses next reference curve.
-        stampThreshFactor - multiplier for identifying closest laser-off (or   
-        other reference curves). This is only used in 'MovingAverage' subtraction.
-        To identify closest reference curves, the algorithm calculates the typical
-        laboratory time between two references. With this number it finds the
-        references that are within the given time window and uses those to calculate
-        the difference. To get the typical time it calculates the median of
-        laboratory times spent between to ref. images and multiples is by 
-        stampThreshFactor, which ensures that all the closest reference images will
-        be used. Note that this approach also ensures that the images taken in
-        different scans will not be intermixed (as long as number of ref images
-        exceed the number of scans, which is usually true). The stampThreshFactor
-        should be between 1 and 2; for 99% of the cases, 1.1 will work just fine.
+                'Next'          - uses next reference curve..
         
         NB: the difference calculation ignores curves marked True in
         self.total.isOutlier
         
         The method updates/adds following fields:
-        self.diff.mapDiff - matrix used to calculate differences. It is very
-                        useful to see which total curves were used for
-                        calculation of a specific diffference. Each column
-                        corresponds to the total curve used for subtraction.
-                        Each row corresponds to the difference curve obtained
-                        in the end. Sum of all the values in each row should be 0.
-                  ds - difference curves
+        self.diff.ds - difference curves
                   delay - delay (in s)
                   delay_str - delay (string format)
                   timeStamp - when the (laser-on) image was measured (epoch)
@@ -498,92 +482,100 @@ class ScatData:
         print('*** Calculating the difference curves ***')
         # declaration of the tuple
         self.diff = namedtuple('differnces', 'mapDiff ds delay delay_str '
-                               'timeStamp timeStamp_str t t_str ')
+                               'timeStamp timeStamp_str t t_str toff_str')
+        assert toff_str in self.total.delay_str, 'toff_str is not found among recorded time delays'
+        self.diff.toff_str = toff_str
+        self.diff.ds = np.zeros((self.q.size, self.nFiles))
+        self.diff.delay = np.array([])
+        self.diff.delay_str = np.array([])
+        self.diff.timeStamp = np.array([])
+        self.diff.timeStamp_str = np.array([])
         
-        # this section will be thoroughly commented as it is a bit non-trivial
-        # calculation of the timeStamp difference matrix:
-        stampDiff = self.total.timeStamp[np.newaxis].T-self.total.timeStamp
-        # avoid self-subtraction:
-        stampDiff[stampDiff==0] = stampDiff.max()
-        # avoid subtraction of non-reference curves
-        stampDiff[:, self.total.delay_str!=toff_str] = stampDiff.max()
-        # avoid using total outliers for difference calculation:
-        stampDiff[:, self.total.isOutlier] = stampDiff.max()
-        stampDiff[self.total.isOutlier, :] = stampDiff.max()
+        idx_to_use = [] # indexes for clean-up
         
-        # declare intial difference map yet to be filled with -1s:
-        mapDiff = np.eye(stampDiff.shape[0])
-        
-        if subtractFlag == 'MovingAverage':
-            # determine the average laboratory time between taking two
-            # reference images:
-            stampThresh = np.median(np.diff(
-                self.total.timeStamp[self.total.delay_str == toff_str]))
-            # multiply it by a factor between 1 and 2 to ensure that all
-            # reference curves will be taken into account correctly:
-            stampThresh *= stampThreshFactor
-            # find reference (laser-off) curves to be suntracted (TBS):
-            offsTBS = np.abs(stampDiff)<stampThresh
-            print('stampThresh =', stampThresh)
-            # get weighting factors for the closest reference curves:
-            mapDiff = getWeights(self.total.timeStamp, offsTBS, mapDiff)
-        
-        elif subtractFlag == 'Closest':
-            # find closest reference (laser-off) curves TBS:
-            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
-            # assign corresponding indeces in mapDiff to -1
-            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
-            # After the previous line you will have some duplicates among
-            # reference curves. For example, if you have two reference curves,
-            # lets call them 1 and 2, you will have two entries in the difference
-            # map, whcih will subtract 1 from 2 and 2 from 1. To avoid these
-            # duplicates, we search for linearly dependent lines in mapDiff and
-            # remove them like so:
-            mapDiff = mapDiff[sympy.Matrix(mapDiff).T.rref()[1],:]
-        
-        elif subtractFlag == 'Previous':
-            # make sure that the next reference curves will not be used for
-            # calculation:
-            stampDiff[stampDiff<0] = stampDiff.max()
-            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
-            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
-            # due to the ways the .max() works, we need to clean-up the upper
-            # triangle of the matrix:
-            mapDiff = np.tril(mapDiff)
+        for i in range(self.nFiles):
             
-        elif subtractFlag == 'Next':
-            # make sure that the previous reference curves will not be used for
-            # calculation:
-            stampDiff[stampDiff>0] = stampDiff.max()
-            stampDiff = np.abs(stampDiff)
-            offsTBS = np.argmin(np.abs(stampDiff), axis=1)
-            mapDiff[np.arange(mapDiff.shape[0]), offsTBS] = -1
-            # clean-up:
-            mapDiff = np.triu(mapDiff)
-        else:
-            raise ValueError('subtractFlag should be one of the following:'
-                             'MovingAverage, Closest, Previous, or Next')
-        # final clean-up of the mapDiff: all the lines that do not have a 0 sum,
-        # (i.e. do not map differences), as well as outliers, are removed
-        mapDiff = mapDiff[(np.abs(np.sum(mapDiff, axis=1))<1e-4) & ( ~self.total.isOutlier),:]
-        # find indeces of the curves FROM which reference were subtracted:
-        idxDiff = np.where(mapDiff==1)[1]
-        ds = np.dot(mapDiff,self.total.s.T).T
-        # 1d dezingering:
-        if dezinger:
-            for i,_ in enumerate(ds.T):
-                ds[:,i] = medianDezinger1d(ds[:,i])
+            s_tbs = None
+            idx_next = self._findOffIdx(i, 'Next')
+            idx_prev = self._findOffIdx(i, 'Prev')
+            
+            if subtractFlag == 'Next':
+                if idx_next:
+                    s_tbs = self.total.s[:, idx_next]
+            
+            elif subtractFlag == 'Previous':
+                if idx_prev:
+                    s_tbs = self.total.s[:, idx_prev]
+            
+            elif subtractFlag == 'Closest':
+                if self.total.delay_str[i] == self.diff.toff_str: # this is to avoid getting the same differences
+                    if idx_next:
+                        s_tbs = self.total.s[:, idx_next]
+                else:
+                    if (idx_next) and (idx_prev):
+                        timeToNext = np.abs(self.total.timeStamp[i] - self.total.timeStamp[idx_next])
+                        timeToPrev = np.abs(self.total.timeStamp[i] - self.total.timeStamp[idx_prev])
+                        if timeToNext <= timeToPrev:
+                            s_tbs = self.total.s[:, idx_next]
+                        else:
+                            s_tbs = self.total.s[:, idx_prev]
+                    elif (idx_next) and (not idx_prev):
+                        s_tbs = self.total.s[:, idx_next]
+                    elif (not idx_next) and (idx_prev):
+                        s_tbs = self.total.s[:, idx_prev]
+                        
+            elif subtractFlag == 'MovingAverage':
+                if (idx_next) and (idx_prev):
+                    timeToNext = np.abs(self.total.timeStamp[i] - 
+                                        self.total.timeStamp[idx_next])
+                    timeToPrev = np.abs(self.total.timeStamp[i] - 
+                                        self.total.timeStamp[idx_prev])
+                    timeDiff = np.abs(self.total.timeStamp[idx_next] - 
+                                      self.total.timeStamp[idx_prev])
+                    w_next = timeToPrev/timeDiff
+                    w_prev = timeToNext/timeDiff
+                    s_tbs = (w_next*self.total.s[:, idx_next] + 
+                             w_prev*self.total.s[:, idx_prev])
+                elif (idx_next) and (not idx_prev):
+                    s_tbs = self.total.s[:, idx_next]
+                elif (not idx_next) and (idx_prev):
+                    s_tbs = self.total.s[:, idx_prev]
+                    
+            if s_tbs is not None:
+                idx_to_use.append(i)
+                ds_loc = self.total.s[:, i] - s_tbs
+                if dezinger:
+                    ds_loc = medianDezinger1d(ds_loc)
+                self.diff.ds[:,i] = ds_loc
         
-        # Fill in all the necessary fields:
-        self.diff.mapDiff = mapDiff
-        self.diff.ds = ds
-        self.diff.delay = self.total.delay[idxDiff]
-        self.diff.delay_str = self.total.delay_str[idxDiff]
-        self.diff.timeStamp = self.total.timeStamp[idxDiff]
-        self.diff.timeStamp_str = self.total.timeStamp_str[idxDiff]
+        self.diff.ds = self.diff.ds[:, idx_to_use] # clean-up
+        
+        self.diff.delay = self.total.delay[idx_to_use]
+        self.diff.delay_str = self.total.delay_str[idx_to_use]
+        self.diff.timeStamp = self.total.timeStamp[idx_to_use]
+        self.diff.timeStamp_str = self.total.timeStamp_str[idx_to_use]
         self.diff.t = np.unique(self.diff.delay)
         self.diff.t_str = np.unique(self.diff.delay_str)
-        self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)
+        self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)                
+        print('')  
+        print('*** Done with the difference curves ***')
+    
+    
+    
+    def _findOffIdx(self, idx, direction):
+        idx_start = idx
+        while True:
+            if direction == 'Next':
+                idx += 1
+            elif direction == 'Prev':
+                idx -= 1
+            else:
+                raise ValueError('direction must be "Next" or "Prev"')
+            if (idx<0) or idx>(self.nFiles-1):
+                return None
+            if ((self.total.delay_str[idx] == self.diff.toff_str) and # find next/prev reference
+                (self.total.scanStamp[idx] == self.total.scanStamp[idx_start])): # should be in the same scan
+                return idx
 
 
 
