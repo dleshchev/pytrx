@@ -22,15 +22,12 @@ from pathlib import Path
 import ntpath
 import time
 from datetime import datetime
-from collections import namedtuple
 
 import numpy as np
 import pandas as pd
-import sympy
 from matplotlib import pyplot as plt
 from scipy.ndimage import median_filter
 import scipy.signal as signal
-import time
 
 import pyFAI
 import fabio
@@ -86,7 +83,7 @@ class ScatData:
     '''
     
     def __init__(self, logFile=None, dataInDir=None, dataOutDir=None,
-                 logFileStyle='biocars', ignoreFirst=False, nImages=None):
+                 logFileStyle='biocars', ignoreFirst=False, nFiles=None):
         ''' To initialize the class, you will need:
             
             logFile - name of the log file. Should be a string or a list of
@@ -101,7 +98,7 @@ class ScatData:
             possible value is 'id09'.
             ignoreFirst - if True, the log reader will remove first image from
             each run frim the data analysis.
-            nImages - number of images you want to integrate in each run.
+            nFiles - number of images you want to integrate in each run.
             
             The initialization adds a logData attribute (self.logData), which 
             is a pandas table containing all the log information.
@@ -114,24 +111,29 @@ class ScatData:
         
         if isinstance(logFile ,str):
             logFile = [logFile] # convert to list for smooth handling
- 
+        
+        print('*** Reading log files ***')
         logDataAsList = []
         for i,item in enumerate(logFile):
             if logFileStyle == 'biocars':
                 logDataAsList.append(pd.read_csv(item, sep = '\t', header = 18))
-                logDataAsList[i].rename(columns = {'#date time':'date time'}, inplace = True)
+                logDataAsList[i].rename(columns = {'#date time':'timeStamp_str', 'delay':'delay_str'}, inplace = True)
+                logDataAsList[i]['delay'] = logDataAsList[i]['delay_str'].apply(lambda x: time_str2num(x))
+            
             elif logFileStyle == 'id09':
-                id09_columns = _get_id09_columns()
                 logDataAsList.append(pd.read_csv(item, skiprows=1, skipfooter=1, sep='\t',
-                                                 engine='python', names=id09_columns,
+                                                 engine='python', names=_get_id09_columns(),
                                                  skipinitialspace=True))
-                logDataAsList[i]['date time'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
-                
+                logDataAsList[i]['timeStamp_str'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
+                logDataAsList[i]['delay_str'] = logDataAsList[i]['delay'].apply(lambda x: time_num2str(x))
+            
+            logDataAsList[i]['timeStamp'] = logDataAsList[i]['timeStamp_str'].apply(
+                    lambda x: datetime.strptime(x,'%d-%b-%y %H:%M:%S').timestamp())
             
             if ignoreFirst:
                 logDataAsList[i] = logDataAsList[i][1:]
-            if nImages:
-                logDataAsList[i] = logDataAsList[i][:nImages]
+            if nFiles:
+                logDataAsList[i] = logDataAsList[i][:nFiles]
                 
             logDataAsList[i]['Scan'] = ntpath.splitext(ntpath.basename(item))[0]
             if isinstance(dataInDir ,str):
@@ -142,6 +144,7 @@ class ScatData:
         self.logData = pd.concat(logDataAsList, ignore_index=True)
                 
         # clean logData from files that do not exist for whatever reason
+        print('Checking if all the files/images exist')
         idxToDel = []
         for i, row in self.logData.iterrows():
             if logFileStyle == 'id09':
@@ -149,22 +152,17 @@ class ScatData:
             filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
             if not Path(filePath).is_file():
                 idxToDel.append(i)
-                print(filePath, 'does not exist and therefore will be excluded from analysis')
+                print(filePath, 'does not exist and will be excluded from analysis')
         self.logData = self.logData.drop(idxToDel)
         
         # print out the number of time delays and number of files
-        self.nFiles = len(self.logData['delay'].tolist())
-        delays, delays_str = self._getDelays()
-        delays_str_unique = np.unique(delays_str)
-        delays_str_unique = delays_str_unique[np.argsort(
-                np.array([time_str2num(i) for i in delays_str_unique]))]
-        self.nDelays = len(delays_str_unique)
-        print('Successful initialization:')
+        print('Done with checking\nSummary:')
+        self.nFiles = len(self.logData.index)
+        self.nDelays = self.logData['delay_str'].nunique()
         print('Found %s files' % self.nFiles)
         print('Found %s time delays' % self.nDelays)
-        print('delay \t # files')
-        for d in delays_str_unique:
-            print(d, '\t', np.sum(delays_str==d))
+        print('Details:\ndelay \t # files')
+        print(self.logData['delay_str'].value_counts())
 
 
 
@@ -258,17 +256,18 @@ class ScatData:
         else:
             maskImage = None
         
-        # Declaration of all the necessary attributes/fields:
-        self.total = namedtuple('total','s s_raw normInt delay delay_str t t_str '
-                                'timeStamp timeStamp_str scanStamp imageAv isOutlier')
+        # Declaration of all the necessary attributes/fields in self.total:
+        self.total = DataContainer()
         self.total.s = np.zeros([nqpt, self.nFiles])
         self.total.s_raw = np.zeros([nqpt, self.nFiles])
         self.total.normInt = np.zeros(self.nFiles)
-        self.total.delay, self.total.delay_str = self._getDelays()
+        self.total.delay = self.logData['delay'].values
+        self.total.delay_str = self.logData['delay_str'].values
         self.total.t = np.unique(self.total.delay)
         self.total.t_str = np.unique(self.total.delay_str)
-        self.total.timeStamp, self.total.timeStamp_str = self._getTimeStamps()
-        self.total.scanStamp = np.array(self.logData['Scan'].tolist())
+        self.total.timeStamp = self.logData['timeStamp'].values
+        self.total.timeStamp_str = self.logData['timeStamp_str'].values
+        self.total.scanStamp = self.logData['Scan'].values
         self.total.isOutlier = np.zeros(self.nFiles, dtype = bool)
         
         # Do the procedure!
@@ -289,14 +288,12 @@ class ScatData:
                                                     polarization_factor = 1,
                                                     mask = maskImage,
                                                     unit = "q_A^-1"  )
-            #get the region for normalization on the first iteration:
-            if i==0: qNormRangeSel = (q>=qNormRange[0]) & (q<=qNormRange[1])
-            self.total.normInt[i] = np.trapz(self.total.s_raw[qNormRangeSel,i], 
-                                                        q[qNormRangeSel])
             self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
-            self.imageAv += image
-            intTime = time.clock() - startIntTime
             
+            if i==0: self.imageAv = image
+            else: self.imageAv += image
+            
+            intTime = time.clock() - startIntTime
             print(i+1, '|',
                   row['file'], ':',
                   'readout: %.0f' % (readTime*1e3),
@@ -309,6 +306,7 @@ class ScatData:
             
         print('*** Integration done ***')
         self.q = q
+        self.total.normInt, self.total.s = normalizeQ(q, self.total.s_raw, qNormRange)
         self.imageAv = self.imageAv/(i+1)
         self.imageAv[maskImage==1] = 0
         # check the quality of mask via taking 360 azimuthal slices:
@@ -361,7 +359,7 @@ class ScatData:
         the input to self.integrate() method.
         '''
         wavelen = 12.3984/energy*1e-10 # in m
-        self.AIGeometry = namedtuple('AIGeometry', 'ai nqpt qRange qNormRange')
+        self.AIGeometry = DataContainer()
         self.AIGeometry.ai = pyFAI.AzimuthalIntegrator(dist = distance*1e-3,
                                                        poni1 = centerY*pixelSize,
                                                        poni2 = centerX*pixelSize,
@@ -372,30 +370,6 @@ class ScatData:
         self.AIGeometry.qRange = qRange
         self.AIGeometry.qNormRange = qNormRange
         self.AIGeometry.nqpt = nqpt
-
-
-
-    def _getDelays(self):
-        ''' Method for getting delays from the logData in numerical and string
-            forms.
-            This function uses the attributes of the class and does a return of
-            time delays in numerical and string formats. This is done for
-            the readability of the code  in the main function.
-        '''
-        if isinstance(self.logData['delay'][0], str):
-            delay_str = self.logData['delay'].tolist()
-            delay = []
-            for t_str in delay_str:
-                delay.append(time_str2num(t_str))            
-        elif isinstance(self.logData['delay'][0], float):
-            delay = self.logData['delay'].tolist()
-            delay_str = []
-            for t in delay:
-                delay_str.append(time_num2str(t))           
-        
-        delay_str = np.array(delay_str)
-        delay = np.array(delay)
-        return delay, delay_str
 
 
 
@@ -456,7 +430,7 @@ class ScatData:
 
     
     def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage', 
-                       dezinger=True):
+                       dezinger=True, renormalize=False, qNormRange=None):
         ''' Method for calculating differences.
         
         You will need:
@@ -487,9 +461,11 @@ class ScatData:
                         no rejection has been implented yet
         '''
         print('*** Calculating the difference curves ***')
-        # declaration of the tuple
-        self.diff = namedtuple('differnces', 'mapDiff ds delay delay_str '
-                               'timeStamp timeStamp_str t t_str toff_str')
+        if renormalize:
+            self.AIGeometry.qNormRange = qNormRange
+            self.total.normInt, self.total.s = normalizeQ(self.q, self.total.s_raw, qNormRange)
+            
+        self.diff = DataContainer()
         assert toff_str in self.total.delay_str, 'toff_str is not found among recorded time delays'
         self.diff.toff_str = toff_str
         self.diff.ds = np.zeros((self.q.size, self.nFiles))
@@ -614,6 +590,12 @@ class ScatData:
 # This functions are put outside of the class as they can be used in broader
 # contexts and such implementation simplifies access to them.
         
+
+class DataContainer:
+    # dummy class to store the data
+    def __init__(self):
+        pass        
+        
         
 def _get_id09_columns():
     id09_columns = ['date', 'time', 'file',
@@ -672,6 +654,13 @@ def medianDezinger1d(x_orig, fraction=0.9, kernel_size=5, thresh=5):
     x_nnz_dez[hot_pixels] = x_nnz_filt[hot_pixels]
     x[idx_nnz] = x_nnz_dez
     return x
+    
+
+
+def normalizeQ(q, s_raw, qNormRange):
+    qNormRangeSel = (q>=qNormRange[0]) & (q<=qNormRange[1])
+    normInt = np.trapz(s_raw[qNormRangeSel, :], q[qNormRangeSel], axis=0)
+    return normInt, s_raw/normInt
     
 
 
