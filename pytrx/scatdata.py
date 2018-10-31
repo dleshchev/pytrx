@@ -243,8 +243,9 @@ class ScatData:
             
         '''
         # Get all the ingredients for integration:
-        self._getAIGeometry(energy, distance, pixelSize, centerX, centerY,
-                           qRange, nqpt, qNormRange)
+        if not hasattr(self, 'AIGeometry'):
+            self._getAIGeometry(energy, distance, pixelSize, centerX, centerY,
+                               qRange, nqpt, qNormRange)
         if maskPath:
             assert isinstance(maskPath, str), 'maskPath should be string'
             assert Path(maskPath).is_file(), maskPath + ' file (mask) not found'
@@ -354,19 +355,31 @@ class ScatData:
         '''Method for storing the geometry parameters in self.AIGeometry from
         the input to self.integrate() method.
         '''
-        wavelen = 12.3984/energy*1e-10 # in m
+        
         self.AIGeometry = DataContainer()
-        self.AIGeometry.ai = pyFAI.AzimuthalIntegrator(dist = distance*1e-3,
-                                                       poni1 = centerY*pixelSize,
-                                                       poni2 = centerX*pixelSize,
-                                                       pixel1 = pixelSize,
-                                                       pixel2 = pixelSize,
-                                                       rot1=0,rot2=0,rot3=0,
-                                                       wavelength = wavelen)
+        self.AIGeometry.energy = energy
+        self.AIGeometry.wavelength = 12.3984/energy*1e-10 # in m
+        self.AIGeometry.distance = distance
+        self.AIGeometry.pixelSize = pixelSize
+        self.AIGeometry.centerX = centerX
+        self.AIGeometry.centerY = centerY
         self.AIGeometry.qRange = qRange
-        self.AIGeometry.qNormRange = qNormRange
         self.AIGeometry.nqpt = nqpt
-
+        self.AIGeometry.qNormRange = qNormRange
+        self.AIGeometry.ai = self._getai()
+    
+    
+    
+    def _getai(self):
+         return pyFAI.AzimuthalIntegrator(
+                dist = self.AIGeometry.distance*1e-3,
+                poni1 = self.AIGeometry.centerY*self.AIGeometry.pixelSize,
+                poni2 = self.AIGeometry.centerX*self.AIGeometry.pixelSize,
+                pixel1 = self.AIGeometry.pixelSize,
+                pixel2 = self.AIGeometry.pixelSize,
+                rot1=0,rot2=0,rot3=0,
+                wavelength = self.AIGeometry.wavelength)
+        
 
 
     def _getTimeStamps(self):
@@ -606,9 +619,10 @@ class ScatData:
                         if not (subattr.startswith('_') or
                                 subattr.startswith('ai')):
                             data_to_record = obj.__getattribute__(subattr)
-                            if type(data_to_record) is not int:
-                                if ((type(data_to_record)==str) or
-                                    (type(data_to_record[0])==str)):
+                            if not ((type(data_to_record) == int) or
+                                    (type(data_to_record) == float)):
+                                if ((type(data_to_record) == str) or
+                                    (type(data_to_record[0]) == str)):
                                     data_to_record = '|'.join([i for i in data_to_record])
                             
                             f.create_dataset(attr+'/'+subattr, data=data_to_record)
@@ -626,6 +640,36 @@ class ScatData:
         f.close()
         print('*** Done with saving ***')
         
+        
+        
+    def loadFromHDF(self, loadPath=None):
+        
+        assert isinstance(loadPath, str), \
+        'provide data output directory as a string'
+        assert Path(loadPath).is_file(), \
+        'the file has not been found'
+        
+        print('*** Loading ***')
+        f = h5py.File(loadPath, 'r')
+        for key in f.keys():
+            if type(f[key]) == h5py.Dataset:
+                print(key, '- Dataset')
+                self.__setattr__(key, f[key].value)
+            elif type(f[key]) == h5py.Group:
+                print(key, '- group')
+                self.__setattr__(key, DataContainer())
+                for subkey in f[key]:
+                    if type(f[key][subkey].value) == str:
+                        data_to_load = np.array(f[key][subkey].value.split('|'))
+                    else:
+                        data_to_load = f[key][subkey].value
+                    self.__getattribute__(key).__setattr__(subkey, data_to_load)
+        
+        f.close()
+        if hasattr(self, 'AIGeometry'):
+            self.AIGeometry.ai = self._getai()
+        
+        print('*** Loading finished***')
 
 #%% Auxillary functions
 # This functions are put outside of the class as they can be used in broader
