@@ -11,8 +11,6 @@ understand input/output.
 @author: Denis Leshchev
 
 todo:
-- add renormalization option for difference calculation
-- more elaborate summary output
 - each visualization should be a separate function
 - visualization of outlier rejection should be decluttered
 - add read/load methods
@@ -28,6 +26,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from scipy.ndimage import median_filter
 import scipy.signal as signal
+import h5py
 
 import pyFAI
 import fabio
@@ -36,11 +35,7 @@ import fabio
 class ScatData:
     
     ''' This is a class for processing, storage, and loading of time resolved
-        x-ray scattering data. The methods invoked during the workflow update the
-        attributes of the class instead of just providing returned values. This
-        might seem a bit counter-intuitive, but this approach results in a 
-        convenient handling of multiple datasets in a uniform fashion down the
-        line during the analysis.
+        x-ray scattering data.
         
         The workflow:
         
@@ -79,11 +74,17 @@ class ScatData:
         
         6. Load data using A.loadData(<parameters>). *in progress*
         
+        The methods invoked during the workflow update the
+        attributes of the class instead of just providing returned values. This
+        might seem a bit counter-intuitive, but this approach results in a 
+        convenient handling of multiple datasets in a uniform fashion down the
+        line during the analysis.
+        
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
     
-    def __init__(self, logFile=None, dataInDir=None, dataOutDir=None,
-                 logFileStyle='biocars', ignoreFirst=False, nFiles=None):
+    def __init__(self, logFile=None, dataInDir=None, logFileStyle='biocars',
+                 ignoreFirst=False, nFiles=None):
         ''' To initialize the class, you will need:
             
             logFile - name of the log file. Should be a string or a list of
@@ -93,7 +94,6 @@ class ScatData:
             argument should also be a string. If logFile is a list of strings,
             this argument should be a list of strings, ordered in the same way
             as logFile list.
-            dataOutDir - name of the output directory. Always a string.
             logFileStyle - style of logFile set to 'biocars' by default. Other
             possible value is 'id09'.
             ignoreFirst - if True, the log reader will remove first image from
@@ -107,7 +107,7 @@ class ScatData:
             unique time delays were measured in a given data set.
         '''
         # check if input is correct:
-        self._assertCorrectInput(logFile, dataInDir, dataOutDir, logFileStyle) 
+        self._assertCorrectInput(logFile, dataInDir, logFileStyle) 
         
         if isinstance(logFile ,str):
             logFile = [logFile] # convert to list for smooth handling
@@ -166,7 +166,7 @@ class ScatData:
 
 
 
-    def _assertCorrectInput(self, logFile, dataInDir, dataOutDir, logFileStyle):
+    def _assertCorrectInput(self, logFile, dataInDir, logFileStyle):
         ''' This method asserts the right input according to the logic described
         in __init__ method.
         '''
@@ -192,10 +192,6 @@ class ScatData:
             'same size and correspondingly ordered as the list of log files'
             for item in dataInDir:
                 assert Path(item).is_dir(), item+' not found'
-        
-        assert isinstance(dataOutDir, str), \
-        'provide data output directory as a string'
-        assert Path(dataOutDir).is_dir(), 'output directory not found'
         
         assert (logFileStyle == 'biocars') or (logFileStyle == 'id09'), \
         'logFileStyle can be either "biocars" or "id09"'
@@ -537,6 +533,7 @@ class ScatData:
         self.diff.delay_str = self.total.delay_str[idx_to_use]
         self.diff.timeStamp = self.total.timeStamp[idx_to_use]
         self.diff.timeStamp_str = self.total.timeStamp_str[idx_to_use]
+        self.diff.scanStamp = self.total.scanStamp[idx_to_use]
         self.diff.t = np.unique(self.diff.delay)
         self.diff.t_str = np.unique(self.diff.delay_str)
         self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)                
@@ -583,8 +580,52 @@ class ScatData:
 
 
         
-
-
+# 5. Saving
+    
+    
+    
+    def saveToHDF(self, savePath=None):
+        
+        assert isinstance(savePath, str), \
+        'provide data output directory as a string'
+        
+        print('*** Saving ***')
+        f = h5py.File(savePath, 'w')
+        for attr in dir(self):
+            if not (attr.startswith('_') or
+                    attr.startswith('get') or
+                    attr.startswith('save') or
+                    attr.startswith('load') or
+                    attr.startswith('integrate')):
+                
+                if ((attr == 'total') or
+                    (attr == 'diff') or
+                    (attr == 'AIGeometry')):
+                    obj = self.__getattribute__(attr)
+                    for subattr in dir(obj):
+                        if not (subattr.startswith('_') or
+                                subattr.startswith('ai')):
+                            data_to_record = obj.__getattribute__(subattr)
+                            if type(data_to_record) is not int:
+                                if ((type(data_to_record)==str) or
+                                    (type(data_to_record[0])==str)):
+                                    data_to_record = '|'.join([i for i in data_to_record])
+                            
+                            f.create_dataset(attr+'/'+subattr, data=data_to_record)
+                            print(attr+'/'+subattr, 'was successfully saved')
+                
+                elif attr == 'logData':
+                    self.logData.to_hdf(savePath, key='logData', mode='r+')
+                    print(attr, 'was successfully saved')
+                    
+                else:
+                    data_to_record = self.__getattribute__(attr)
+                    f.create_dataset(attr, data=data_to_record)
+                    print(attr, 'was successfully saved')
+                    
+        f.close()
+        print('*** Done with saving ***')
+        
 
 #%% Auxillary functions
 # This functions are put outside of the class as they can be used in broader
