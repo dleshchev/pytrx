@@ -14,6 +14,7 @@ todo:
 - each visualization should be a separate function
 - visualization of outlier rejection should be decluttered
 - add read/load methods
+- add tth calculation
 
 """
 from pathlib import Path
@@ -83,10 +84,11 @@ class ScatData:
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
     
-    def __init__(self, logFile=None, dataInDir=None, logFileStyle='biocars',
-                 ignoreFirst=False, nFiles=None):
-        ''' To initialize the class, you will need:
+    def __init__(self, initFlag='create_new', logFile=None, dataInDir=None, logFileStyle='biocars',
+                 ignoreFirst=False, nFiles=None, loadPath=None):
+        ''' To initialize the class, you will need either of the following:
             
+            (1) if initFlag='create_new':
             logFile - name of the log file. Should be a string or a list of
             strings. Should contain ".log" extension.
             dataInDir - name of the directory which contains data. Should be a
@@ -103,11 +105,29 @@ class ScatData:
             The initialization adds a logData attribute (self.logData), which 
             is a pandas table containing all the log information.
             
+            (2) if initFlag='load_old':
+            loadPath - path to .h5 file where the scattering data was previously
+            stored.
+            This procedure will create all the necessary fields in the data and 
+            fill them with the data from that .h5 file.
+            
             Successful initialization will tell you how many images and how many
             unique time delays were measured in a given data set.
+            
         '''
-        # check if input is correct:
-        self._assertCorrectInput(logFile, dataInDir, logFileStyle) 
+
+        if initFlag == 'create_new':
+            self._getLogData(logFile, logFileStyle, ignoreFirst, nFiles, dataInDir)
+            self._identifyExistingFiles(logFileStyle)
+        elif initFlag == 'load_old':
+            self.loadFromHDF(loadPath=loadPath)
+
+        self._logSummary()
+
+
+
+    def _getLogData(self, logFile, logFileStyle, ignoreFirst, nFiles, dataInDir):
+        self._assertCorrectInput(logFile, dataInDir, logFileStyle)
         
         if isinstance(logFile ,str):
             logFile = [logFile] # convert to list for smooth handling
@@ -142,27 +162,6 @@ class ScatData:
                 logDataAsList[i]['dataInDir'] = dataInDir[i]
         
         self.logData = pd.concat(logDataAsList, ignore_index=True)
-                
-        # clean logData from files that do not exist for whatever reason
-        print('Checking if all the files/images exist')
-        idxToDel = []
-        for i, row in self.logData.iterrows():
-            if logFileStyle == 'id09':
-                self.logData.loc[i,'file'] = self.logData.loc[i,'file'].replace('ccdraw','edf')
-            filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
-            if not Path(filePath).is_file():
-                idxToDel.append(i)
-                print(filePath, 'does not exist and will be excluded from analysis')
-        self.logData = self.logData.drop(idxToDel)
-        
-        # print out the number of time delays and number of files
-        print('Done with checking\nSummary:')
-        self.nFiles = len(self.logData.index)
-        self.nDelays = self.logData['delay_str'].nunique()
-        print('Found %s files' % self.nFiles)
-        print('Found %s time delays' % self.nDelays)
-        print('Details:\ndelay \t # files')
-        print(self.logData['delay_str'].value_counts())
 
 
 
@@ -195,6 +194,32 @@ class ScatData:
         
         assert (logFileStyle == 'biocars') or (logFileStyle == 'id09'), \
         'logFileStyle can be either "biocars" or "id09"'
+
+
+
+    def _identifyExistingFiles(self, logFileStyle):
+        print('Checking if all the files/images exist')
+        idxToDel = []
+        for i, row in self.logData.iterrows():
+            if logFileStyle == 'id09':
+                self.logData.loc[i,'file'] = self.logData.loc[i,'file'].replace('ccdraw','edf')
+            filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
+            if not Path(filePath).is_file():
+                idxToDel.append(i)
+                print(filePath, 'does not exist and will be excluded from analysis')
+        self.logData = self.logData.drop(idxToDel)
+        print('*** Done with checking ***')
+
+
+
+    def _logSummary(self):
+        print('*** Summary ***')
+        self.nFiles = len(self.logData.index)
+        self.nDelays = self.logData['delay_str'].nunique()
+        print('Found %s files' % self.nFiles)
+        print('Found %s time delays' % self.nDelays)
+        print('Details:\ndelay \t # files')
+        print(self.logData['delay_str'].value_counts())
 
 
 
@@ -655,7 +680,7 @@ class ScatData:
             if type(f[key]) == h5py.Dataset:
                 print(key, '- Dataset')
                 self.__setattr__(key, f[key].value)
-            elif type(f[key]) == h5py.Group:
+            elif (type(f[key]) == h5py.Group) and (key != 'logData'):
                 print(key, '- group')
                 self.__setattr__(key, DataContainer())
                 for subkey in f[key]:
@@ -664,6 +689,8 @@ class ScatData:
                     else:
                         data_to_load = f[key][subkey].value
                     self.__getattribute__(key).__setattr__(subkey, data_to_load)
+            elif (key == 'logData'):
+                self.logData = pd.read_hdf(loadPath, key=key)
         
         f.close()
         if hasattr(self, 'AIGeometry'):
@@ -777,17 +804,17 @@ def time_num2str(t):
     '''
     A = np.log10(np.abs(t))
     if (A < -12):
-        t_str = str(round(t*1e15)) + 'fs'
+        t_str = str(round(t*1e15,3)) + 'fs'
     elif (A >= -12) and (A < -9):
-        t_str = str(round(t*1e12)) + 'ps'
+        t_str = str(round(t*1e12,3)) + 'ps'
     elif (A >= -9) and (A < -6):
-        t_str = str(round(t*1e9)) + 'ns'
+        t_str = str(round(t*1e9,3)) + 'ns'
     elif (A >= -6) and (A < -3):
-        t_str = str(round(t*1e6)) + 'us'
+        t_str = str(round(t*1e6,3)) + 'us'
     elif (A >= -3) and (A < 0):
-        t_str = str(round(t*1e3)) + 'ms'
+        t_str = str(round(t*1e3,3)) + 'ms'
     else:
-        t_str = str(int(t))
+        t_str = str(round(t,3))
     return t_str
     
 
