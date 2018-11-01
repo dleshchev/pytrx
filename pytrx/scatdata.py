@@ -162,6 +162,7 @@ class ScatData:
                 logDataAsList[i]['dataInDir'] = dataInDir[i]
         
         self.logData = pd.concat(logDataAsList, ignore_index=True)
+        print('*** Done ***')
 
 
 
@@ -198,7 +199,7 @@ class ScatData:
 
 
     def _identifyExistingFiles(self, logFileStyle):
-        print('Checking if all the files/images exist')
+        print('*** Checking if all the files/images exist ***')
         idxToDel = []
         for i, row in self.logData.iterrows():
             if logFileStyle == 'id09':
@@ -208,18 +209,32 @@ class ScatData:
                 idxToDel.append(i)
                 print(filePath, 'does not exist and will be excluded from analysis')
         self.logData = self.logData.drop(idxToDel)
-        print('*** Done with checking ***')
+        print('*** Done ***')
 
 
 
     def _logSummary(self):
         print('*** Summary ***')
-        self.nFiles = len(self.logData.index)
-        self.nDelays = self.logData['delay_str'].nunique()
+        
+        if not hasattr(self, 'nFiles'):
+            self.nFiles = len(self.logData.index)
+        if not hasattr(self, 'nDelay'):
+            self.nDelays = self.logData['delay_str'].nunique()
+        if not hasattr(self, 't'):
+            self.t = self.logData['delay'].unique()
+        if not hasattr(self, 't_str'):
+            self.t_str = self.logData['delay_str'].unique()
+            self.t_str = self.t_str[np.argsort(self.t)]
+            self.t = np.sort(self.t)
+        
         print('Found %s files' % self.nFiles)
         print('Found %s time delays' % self.nDelays)
         print('Details:\ndelay \t # files')
-        print(self.logData['delay_str'].value_counts())
+#        print(self.logData['delay_str'].value_counts()) # unsorted output
+        for t_str in self.t_str:
+            print(t_str, '\t', np.sum(self.logData['delay_str']==t_str))
+       
+        print('*** End of summary ***')
 
 
 
@@ -257,8 +272,6 @@ class ScatData:
                        normInt - normalization value
                        delay - numerical time delay (in s)
                        delay_str - sting time delay (ex: '5us', '100ns')
-                       t - unique numerical time delays (in s)
-                       t_str - unique string time delays
                        timeStamp - time when the image was measured (epoch)
                        timeStamp_str - time when the image was measured (string)
                        scanStamp - scan (logFile) name
@@ -278,21 +291,17 @@ class ScatData:
         else:
             maskImage = None
         
-        # Declaration of all the necessary attributes/fields in self.total:
         self.total = DataContainer()
         self.total.s = np.zeros([nqpt, self.nFiles])
         self.total.s_raw = np.zeros([nqpt, self.nFiles])
         self.total.normInt = np.zeros(self.nFiles)
         self.total.delay = self.logData['delay'].values
         self.total.delay_str = self.logData['delay_str'].values
-        self.total.t = np.unique(self.total.delay)
-        self.total.t_str = np.unique(self.total.delay_str)
         self.total.timeStamp = self.logData['timeStamp'].values
         self.total.timeStamp_str = self.logData['timeStamp_str'].values
         self.total.scanStamp = self.logData['Scan'].values
         self.total.isOutlier = np.zeros(self.nFiles, dtype = bool)
         
-        # Do the procedure!
         print('*** Integration ***')
         for i, row in self.logData.iterrows():
             impath = row['dataInDir'] + row['file']
@@ -452,7 +461,7 @@ class ScatData:
         '''
         print('*** Averaging the total curves ***')
         self.total.s_av, self.total.s_err, self.total.isOutlier = \
-          getAverage(self.q, self.total.delay_str, self.total.s, self.total.t_str,
+          getAverage(self.q, self.total.delay_str, self.total.s, self.t_str,
                      fraction, chisqThresh,
                      q_break, chisqThresh_lowq, chisqThresh_highq,
                      plotting, chisqHistMax)
@@ -572,8 +581,6 @@ class ScatData:
         self.diff.timeStamp = self.total.timeStamp[idx_to_use]
         self.diff.timeStamp_str = self.total.timeStamp_str[idx_to_use]
         self.diff.scanStamp = self.total.scanStamp[idx_to_use]
-        self.diff.t = np.unique(self.diff.delay)
-        self.diff.t_str = np.unique(self.diff.delay_str)
         self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)                
         print('')  
         print('*** Done with the difference curves ***')
@@ -610,7 +617,7 @@ class ScatData:
         '''
         print('*** Averaging the difference curves ***')
         self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier = \
-        getAverage(self.q, self.diff.delay_str, self.diff.ds, self.diff.t_str,
+        getAverage(self.q, self.diff.delay_str, self.diff.ds, self.t_str,
                    fraction, chisqThresh,
                    q_break, chisqThresh_lowq, chisqThresh_highq,
                    plotting, chisqHistMax)
@@ -629,6 +636,7 @@ class ScatData:
         
         print('*** Saving ***')
         f = h5py.File(savePath, 'w')
+        
         for attr in dir(self):
             if not (attr.startswith('_') or
                     attr.startswith('get') or
@@ -640,6 +648,7 @@ class ScatData:
                     (attr == 'diff') or
                     (attr == 'AIGeometry')):
                     obj = self.__getattribute__(attr)
+                    print('Group:', attr)
                     for subattr in dir(obj):
                         if not (subattr.startswith('_') or
                                 subattr.startswith('ai')):
@@ -651,37 +660,49 @@ class ScatData:
                                     data_to_record = '|'.join([i for i in data_to_record])
                             
                             f.create_dataset(attr+'/'+subattr, data=data_to_record)
-                            print(attr+'/'+subattr, 'was successfully saved')
+                            print('\t'+subattr, 'saved')
                 
                 elif attr == 'logData':
                     self.logData.to_hdf(savePath, key='logData', mode='r+')
-                    print(attr, 'was successfully saved')
+                    print(attr, 'saved')
                     
                 else:
                     data_to_record = self.__getattribute__(attr)
+                    if not ((type(data_to_record) == int) or
+                            (type(data_to_record) == float)):
+                        if ((type(data_to_record) == str) or
+                            (type(data_to_record[0]) == str)):
+                            data_to_record = '|'.join([i for i in data_to_record])
                     f.create_dataset(attr, data=data_to_record)
-                    print(attr, 'was successfully saved')
-                    
+                    print(attr, 'saved')
+        
         f.close()
-        print('*** Done with saving ***')
+        
+        print('*** Done ***')
         
         
         
     def loadFromHDF(self, loadPath=None):
         
         assert isinstance(loadPath, str), \
-        'provide data output directory as a string'
+        'Provide data output directory as a string'
         assert Path(loadPath).is_file(), \
-        'the file has not been found'
+        'The file has not been found'
         
         print('*** Loading ***')
         f = h5py.File(loadPath, 'r')
+        
         for key in f.keys():
             if type(f[key]) == h5py.Dataset:
-                print(key, '- Dataset')
-                self.__setattr__(key, f[key].value)
+                if type(f[key].value) == str:
+                    data_to_load = np.array(f[key].value.split('|'))
+                else:
+                    data_to_load = f[key].value
+                self.__setattr__(key, data_to_load)
+                print(key, 'loaded')
+            
             elif (type(f[key]) == h5py.Group) and (key != 'logData'):
-                print(key, '- group')
+                print('Group:', key)
                 self.__setattr__(key, DataContainer())
                 for subkey in f[key]:
                     if type(f[key][subkey].value) == str:
@@ -689,14 +710,18 @@ class ScatData:
                     else:
                         data_to_load = f[key][subkey].value
                     self.__getattribute__(key).__setattr__(subkey, data_to_load)
+                    print('\t', subkey, 'loaded')
+            
             elif (key == 'logData'):
                 self.logData = pd.read_hdf(loadPath, key=key)
+                print(key, 'loaded')
         
         f.close()
+        
         if hasattr(self, 'AIGeometry'):
             self.AIGeometry.ai = self._getai()
         
-        print('*** Loading finished***')
+        print('*** Loading finished ***')
 
 #%% Auxillary functions
 # This functions are put outside of the class as they can be used in broader
@@ -802,17 +827,26 @@ def time_num2str(t):
         Input: time delay in s
         Output: time string
     '''
+    
+    def convertToString(t, factor):
+        t_r0 = round(t*factor)
+        t_r3 = round(t*factor, 3)
+        if t_r3 == t_r0:
+            return str(t_r0)
+        else:
+            return str(t_r3)
+    
     A = np.log10(np.abs(t))
     if (A < -12):
-        t_str = str(round(t*1e15,3)) + 'fs'
+        t_str = convertToString(t, 1e15) + 'fs'
     elif (A >= -12) and (A < -9):
-        t_str = str(round(t*1e12,3)) + 'ps'
+        t_str = convertToString(t, 1e12) + 'ps'
     elif (A >= -9) and (A < -6):
-        t_str = str(round(t*1e9,3)) + 'ns'
+        t_str = convertToString(t, 1e9) + 'ns'
     elif (A >= -6) and (A < -3):
-        t_str = str(round(t*1e6,3)) + 'us'
+        t_str = convertToString(t, 1e6) + 'us'
     elif (A >= -3) and (A < 0):
-        t_str = str(round(t*1e3,3)) + 'ms'
+        t_str = convertToString(t, 1e3) + 'ms'
     else:
         t_str = str(round(t,3))
     return t_str
