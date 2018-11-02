@@ -11,16 +11,14 @@ understand input/output.
 @author: Denis Leshchev
 
 todo:
-- each visualization should be a separate function
 - visualization of outlier rejection should be decluttered
-- add read/load methods
-- add tth calculation
 
 """
 from pathlib import Path
 import ntpath
 import time
 from datetime import datetime
+from math import pi
 
 import numpy as np
 import pandas as pd
@@ -135,6 +133,7 @@ class ScatData:
         print('*** Reading log files ***')
         logDataAsList = []
         for i,item in enumerate(logFile):
+            print('reading', item)
             if logFileStyle == 'biocars':
                 logDataAsList.append(pd.read_csv(item, sep = '\t', header = 18))
                 logDataAsList[i].rename(columns = {'#date time':'timeStamp_str', 'delay':'delay_str'}, inplace = True)
@@ -333,10 +332,12 @@ class ScatData:
             
             if nMax:
                 if (i+1) >= nMax:
+                    print('Integrated nMax images')
                     break
             
         print('*** Integration done ***')
         self.q = q
+        self.tth = 2*np.arcsin(self.AIGeometry.wavelength*1e10*self.q/(4*pi))/pi*180
         self.total.normInt, self.total.s = normalizeQ(q, self.total.s_raw, qNormRange)
         self.imageAv = self.imageAv/(i+1)
         self.imageAv[maskImage==1] = 0
@@ -353,34 +354,7 @@ class ScatData:
         imageAv_int_phiSlices[imageAv_int_phiSlices==0] = np.nan
         
         if plotting:
-            # get min and max of scale for average image
-            vmin, vmax = (imageAv_int[imageAv_int!=0].min(), imageAv_int.max())
-            
-            plt.figure(figsize=(12,12))
-            plt.clf()
-            
-            plt.subplot(221)
-            plt.imshow(self.imageAv, vmin=vmin, vmax=vmax)
-            plt.title('Average image')
-            
-            plt.subplot(222)
-            plt.plot(self.q, imageAv_int_phiSlices.T)
-            plt.plot(self.q, imageAv_int,'r.-')
-            plt.xlabel('q, $\AA^{-1}$')
-            plt.ylabel('Intensity, counts')
-            plt.title('Integrated average & sliced integrated average')
-            
-            plt.subplot(223)
-            plt.plot(self.q, self.total.s_raw)
-            plt.xlabel('q, $\AA^{-1}$')
-            plt.ylabel('Intensity, counts')
-            plt.title('All integrated curves')
-            
-            plt.subplot(224)
-            plt.plot(self.q, self.total.s)
-            plt.xlabel('q, $\AA^{-1}$')
-            plt.ylabel('Intensity, a.u.')
-            plt.title('All integrated curves (normalized)')
+            self._plotIntegrationResult(imageAv_int, imageAv_int_phiSlices)
 
 
 
@@ -429,6 +403,39 @@ class ScatData:
         timeStamp = np.array(timeStamp)
         timeStamp_str = np.array(timeStamp_str)
         return timeStamp, timeStamp_str    
+
+
+
+    def _plotIntegrationResult(self, imageAv_int, imageAv_int_phiSlices):
+        # get min and max of scale for average image
+        vmin, vmax = np.percentile(self.imageAv[self.imageAv!=0], (5, 95))
+        
+        plt.figure(figsize=(12,12))
+        plt.clf()
+        
+        plt.subplot(221)
+        plt.imshow(self.imageAv, vmin=vmin, vmax=vmax)
+        plt.colorbar()
+        plt.title('Average image')
+        
+        plt.subplot(222)
+        plt.plot(self.q, imageAv_int_phiSlices.T)
+        plt.plot(self.q, imageAv_int,'r.-')
+        plt.xlabel('q, $\AA^{-1}$')
+        plt.ylabel('Intensity, counts')
+        plt.title('Integrated average & sliced integrated average')
+        
+        plt.subplot(223)
+        plt.plot(self.q, self.total.s_raw)
+        plt.xlabel('q, $\AA^{-1}$')
+        plt.ylabel('Intensity, counts')
+        plt.title('All integrated curves')
+        
+        plt.subplot(224)
+        plt.plot(self.q, self.total.s)
+        plt.xlabel('q, $\AA^{-1}$')
+        plt.ylabel('Intensity, a.u.')
+        plt.title('All integrated curves (normalized)')
 
 
 
