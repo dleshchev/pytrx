@@ -137,7 +137,6 @@ class Solute:
         Asin[QR==0] = 1;
         
         S = np.zeros(q.shape)
-#        print(atomForm)
         for atomPair, atomCorrelation in gr.items():
             sidx = atomPair.index('-') # separator index
             El_i, El_j = atomPair[:sidx], atomPair[sidx+1:]
@@ -148,7 +147,6 @@ class Solute:
         return S
             
         
-    
     
     def getAtomicFormFactor(self,Elements,q):
         s=q/(4*pi)
@@ -181,10 +179,15 @@ class Solute:
     def getElements(self,ZXYZ):    
         return list(set(x[0] for x in ZXYZ))
         
+    
+    
+    def applyPolyCorrection(self, q_poly, E, I, E_eff='auto'):
+        self.s_poly = self._PolyCorrection(self.q, self.s, q_poly, E, I, E_eff=E_eff)
+        self.polyFlag = True
+            
+            
         
-        
-    def _PolyCorrection(q_mono, s_mono, q_poly, E, I, E_eff='auto'):
-        
+    def _PolyCorrection(self, q_mono, s_mono, q_poly, E, I, E_eff):
         I = I[np.argsort(E)]
         E = np.sort(E)
         
@@ -200,19 +203,18 @@ class Solute:
         tth_poly = 2*np.arcsin(q_poly*W_eff/(4*pi))*180/(pi)
         
         if not np.all(tth_poly[0]>tth_mono[0,0]):
-            raise ValueError('Input q range is too narrow: Extend q min.')
+            raise ValueError('Input q range is too narrow: Decrease q_mono min.')
         if not tth_poly[-1]<tth_mono[-1,-1]:
-            raise ValueError('Input q range is too narrow: Extend q max.')
+            raise ValueError('Input q range is too narrow: Increase q_mono max.')
         
-        if len(s_mono.shape) != 2:
+        if len(s_mono.shape)==1:
             s_mono = s_mono[:, np.newaxis]
         
         nCurves = s_mono.shape[1]
         s_poly = np.zeros((q_poly.size, nCurves))
-        
         for i in range(nCurves):
             for j, e in enumerate(E):
-                s_poly[:, i] += I[j]*np.interp(tth_poly, tth_mono[:,j], s_mono[:, i])
+                s_poly[:, i] += I[j]*np.interp(tth_poly, tth_mono[:, j], s_mono[:, i])
         
         return s_poly
 
