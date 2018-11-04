@@ -1052,7 +1052,7 @@ def plotOutliers(q, x, isOutlier, chisq,
         plt.plot(chisqThresh_highq*np.array([1,1]), np.array([0,0.9])*y_offset - subidx*y_offset,'r--')
         plt.xlabel('\chi_lowq^2')
         plt.ylabel('n. occurances')
-        plt.title('\chi^2 occurances. Blue - low q, Red - high q')
+        plt.title('\chi^2 occurances\nBlue - low q, Red - high q')
         
 
 
