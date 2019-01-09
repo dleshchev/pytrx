@@ -143,9 +143,20 @@ class ScatData:
                 logDataAsList.append(pd.read_csv(item, skiprows=1, skipfooter=1, sep='\t',
                                                  engine='python', names=_get_id09_columns(),
                                                  skipinitialspace=True))
+                
                 logDataAsList[i]['timeStamp_str'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
                 logDataAsList[i]['delay_str'] = logDataAsList[i]['delay'].apply(lambda x: time_num2str(x))
             
+            elif logFileStyle == 'id09_new':
+                logDataAsList.append(pd.read_csv(item, skiprows=1, skipfooter=1, sep='\t',
+                                                 engine='python', names=_get_id09_columns_new(),
+                                                 skipinitialspace=True))
+                
+                logDataAsList[i]['timeStamp_str'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
+                logDataAsList[i]['delay_str'] = logDataAsList[i]['delay'].apply(lambda x: time_num2str(x))
+            
+            
+                
             logDataAsList[i]['timeStamp'] = logDataAsList[i]['timeStamp_str'].apply(
                     lambda x: datetime.strptime(x,'%d-%b-%y %H:%M:%S').timestamp())
             
@@ -153,9 +164,10 @@ class ScatData:
                 logDataAsList[i] = logDataAsList[i][1:]
             if nFiles:
                 logDataAsList[i] = logDataAsList[i][:nFiles]
-                
+            
             logDataAsList[i]['Scan'] = ntpath.splitext(ntpath.basename(item))[0]
-            if isinstance(dataInDir ,str):
+            
+            if isinstance(dataInDir, str):
                 logDataAsList[i]['dataInDir'] = dataInDir
             else:
                 logDataAsList[i]['dataInDir'] = dataInDir[i]
@@ -192,7 +204,9 @@ class ScatData:
             for item in dataInDir:
                 assert Path(item).is_dir(), item+' not found'
         
-        assert (logFileStyle == 'biocars') or (logFileStyle == 'id09'), \
+        assert ((logFileStyle == 'biocars') or
+                (logFileStyle == 'id09') or
+                (logFileStyle == 'id09_new')), \
         'logFileStyle can be either "biocars" or "id09"'
 
 
@@ -203,6 +217,9 @@ class ScatData:
         for i, row in self.logData.iterrows():
             if logFileStyle == 'id09':
                 self.logData.loc[i,'file'] = self.logData.loc[i,'file'].replace('ccdraw','edf')
+            elif logFileStyle == 'id09_new':
+                self.logData.loc[i,'file'] += '.edf'
+                
             filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
             if not Path(filePath).is_file():
                 idxToDel.append(i)
@@ -244,6 +261,8 @@ class ScatData:
     def integrate(self, energy=12, distance=365, pixelSize=80e-6,
                   centerX=1900, centerY=1900, qRange=[0.0,4.0], nqpt=400, 
                   qNormRange=[1.9,2.1], maskPath=None,
+                  correctPhosphor=False, muphos=228, lphos=75e-4,
+                  correctSample=False, musample=0.49, lsample=300e-6,
                   dezinger=False, plotting=True, nMax=None):
         ''' This method integrates images given the geometry parameters.
             
@@ -338,6 +357,16 @@ class ScatData:
         print('*** Integration done ***')
         self.q = q
         self.tth = 2*np.arcsin(self.AIGeometry.wavelength*1e10*self.q/(4*pi))/pi*180
+        
+        Corrections = np.ones(q.shape)
+        if correctPhosphor:
+            Tphos = self._getPhosphorAbsorptionCorrection(muphos, lphos, self.tth/180*pi)
+            Corrections *= Tphos
+        if correctSample:
+            Tsample = self._getSampleAbsorptionCorrection(musample, lsample, self.tth/180*pi)
+            Corrections *= Tsample
+        self.total.s = self.total.s*Corrections[:, np.newaxis]
+        
         self.total.normInt, self.total.s = normalizeQ(q, self.total.s_raw, qNormRange)
         self.imageAv = self.imageAv/(i+1)
         self.imageAv[maskImage==1] = 0
@@ -437,6 +466,23 @@ class ScatData:
         plt.ylabel('Intensity, a.u.')
         plt.title('All integrated curves (normalized)')
 
+    
+    
+    def _getPhosphorAbsorptionCorrection(self, mu, l, tth):
+        cv = np.cos(tth) # cos value
+        cph = mu*l  # coef phosphor
+        Tphos = (1-np.exp(-cph))/(1-np.exp(-cph/cv))
+        return Tphos
+    
+    
+    
+    def _getSampleAbsorptionCorrection(self, mu, l, tth):
+        cv = np.cos(tth) # cos value
+        csa = mu*l
+        T = 1/csa*cv/(1-cv)*(np.exp(-csa)-np.exp(-csa/cv))
+        T0 = np.exp(-csa)
+        return T0/T
+        
 
 
 # 2. Total curve averaging
@@ -741,13 +787,24 @@ class DataContainer:
         pass        
         
         
+    
 def _get_id09_columns():
-    id09_columns = ['date', 'time', 'file',
+    return ['date', 'time', 'file',
                     'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max',
                     'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
                     'xray',  'xray_std',  'xray_min',  'xray_max',  'xray_n',
                     'n_pulses']
-    return id09_columns
+
+
+
+def _get_id09_columns_new():
+    return ['date', 'time', 'file',
+                    'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max', 'delay_n',
+                    'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
+                    'xray',  'xray_std',  'xray_min',  'xray_max',  'xray_n',
+                    'n_pulses']
+        
+
 
 def medianDezinger(img_orig, mask):
     ''' Function for image dezingering.
@@ -839,10 +896,11 @@ def time_num2str(t):
         t_r0 = round(t*factor)
         t_r3 = round(t*factor, 3)
         if t_r3 == t_r0:
-            return str(t_r0)
+            return str(int(t_r0))
         else:
             return str(t_r3)
     
+    if t == 0: return '0'
     A = np.log10(np.abs(t))
     if (A < -12):
         t_str = convertToString(t, 1e15) + 'fs'
@@ -1056,7 +1114,11 @@ def plotOutliers(q, x, isOutlier, chisq,
         
 
 
-                  
+def rescaleQ(q_old, wavelength, dist_old, dist_new):
+    tth_old = 2*np.arcsin(wavelength*q_old/4/pi)
+    r = np.arctan(tth_old)*dist_old
+    tth_new = np.tan(r/dist_new)
+    return 4*pi/wavelength*np.sin(tth_new/2) 
 
 
     

@@ -8,6 +8,7 @@ Created on Sun Oct  2 18:02:17 2016
 from math import pi
 from itertools import islice
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import os
 import pkg_resources
@@ -15,7 +16,7 @@ import pkg_resources
 class Solute:
     
     def __init__(self, inputStyle='ZXYZ_file', inputObj=None,
-                 qRange=[0,10], nqpt=1001, modelLabels=None):
+                 qRange=[0,10], nqpt=1001, modelLabels=None, printing=False):
         
         assert ((inputStyle == 'XYZ_file') or
                 (inputStyle == 'XYZ_list') or
@@ -44,7 +45,7 @@ class Solute:
         
         if inputStyle == 'XYZ_file':
             for i, filepath in enumerate(listOfModels):
-                print('Calculating scattering for model', modelLabels[i])
+                if printing: print('Calculating scattering for model', modelLabels[i])
                 model = self.FiletoZXYZ(filepath)
                 self.s[:, i] = self.DebyeScat_fromZXYZ(model, self.q)
         
@@ -52,7 +53,7 @@ class Solute:
             listOfModels = inputObj
             self.s = np.zeros((self.q.size, len(listOfModels)))
             for i, model in enumerate(listOfModels):
-                print('Calculating scattering for model', modelLabels[i])
+                if printing: print('Calculating scattering for model', modelLabels[i])
                 self.s[:, i] = self.DebyeScat_fromZXYZ(model, self.q)
         
         elif inputStyle == 'PDB_file':
@@ -88,8 +89,6 @@ class Solute:
             
             for jtem in ZXYZ[:i]:
                 xyz_j = np.array(jtem[1:])
-                print(item[0], jtem[0])
-                print(xyz_i, xyz_j)
                 r_ij = np.sqrt(np.sum((xyz_i - xyz_j)**2))                
                 f_j = atomForm[jtem[0]]
                 
@@ -149,10 +148,11 @@ class Solute:
         
     
     def getAtomicFormFactor(self,Elements,q):
+        if type(Elements) == str: Elements = [Elements]
+        
         s=q/(4*pi)
         formFunc = lambda s,a: (np.sum(np.reshape(a[:5],[5,1])*
-                                       np.exp(-a[6:,np.newaxis]*s**2),axis=0)
-                                +a[5])
+                                       np.exp(-a[6:,np.newaxis]*s**2),axis=0) + a[5])
 		
         fname = pkg_resources.resource_filename('pytrx', './f0_WaasKirf.dat')
         with open(fname) as f:
@@ -220,6 +220,95 @@ class Solute:
 
 
 
+def Compton(z, q):
+    fname_lowz = pkg_resources.resource_filename('pytrx', './Compton_lowZ.dat')
+    fname_highz = pkg_resources.resource_filename('pytrx', './Compton_highZ.dat')
+    
+    data_lowz = pd.read_csv(fname_lowz, sep='\t')
+    data_highz = pd.read_csv(fname_highz, sep='\t')
+    data_lowz['Z'] = data_lowz['Z'].apply(lambda x: z_num2str(x))
+    data_highz['Z'] = data_highz['Z'].apply(lambda x: z_num2str(x))
+    
+    Scoh = Solute.getAtomicFormFactor(None, z, q)[z]
+    z_num = z_str2num(z)
+    
+    if z in data_lowz['Z'].values:
+        M, K, L = data_lowz[data_lowz['Z']==z].values[0,1:4]
+        S_inc = (z_num - Scoh)/z_num * (1-M*(np.exp(-K*q/(4*pi))-np.exp(-L*q/(4*pi))))
+#        S(idx_un(i),:) = (Z_un(i)-Scoh(idx_un(i),:)/Z_un(i)).*...
+#                         (1-M*(exp(-K*Q/(4*pi))-exp(-L*Q/(4*pi))));
+    elif z in data_highz['Z'].values:
+        A, B, C = data_highz[data_highz['Z']==z].values[0,1:4]
+        S_inc = z_num*(1 - A/(1+B*q/(4*pi))**C)
+#        S(idx_un(i),:) = Z_un(i)*(1-A./(1+B*Q/(4*pi)).^C);
+    
+    elif z == 'H':
+        S_inc = np.zeros(q.shape)
+    else:
+        S_inc = np.zeros(q.shape)
+        print(z, 'not found')
+    return S_inc
+
+    
+
+def z_num2str(z):
+    return ElementString()[z-1]
+
+
+
+def z_str2num(z):
+    for i, el in enumerate(ElementString()):
+        if el == z:
+            return i+1
+
+    
+
+def ElementString():
+    ElementString = 'H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og'
+    return ElementString.split()
+    
+    
+#Scoh = AtomicFormFactorZ(Z,Q).^2;
+#S = zeros(size(Scoh));
+#[Z_un,idx_un,dummy]=unique(Z,'first');
+#for i=1:length(Z_un)
+#    if Z_un(i)>2 && Z_un(i)<37
+#        idx = find(Alow(:,1)==Z_un(i));
+#        M=Alow(idx,2);K=Alow(idx,3);L=Alow(idx,4);
+#        S(idx_un(i),:) = (Z_un(i)-Scoh(idx_un(i),:)/Z_un(i)).*...
+#                        (1-M*(exp(-K*Q/(4*pi))-exp(-L*Q/(4*pi))));
+#        rep_idx=find(Z==Z(idx_un(i))); % finding the repeating Z
+#        S(rep_idx,:) = repmat(S(idx_un(i),:),length(rep_idx),1);
+#    elseif Z_un(i)>36 && Z_un(i)<96
+#        idx = find(Ahigh(:,1)==Z_un(i));
+#        A=Ahigh(idx,2);B=Ahigh(idx,3);C=Ahigh(idx,4);
+#        S(idx_un(i),:) = Z_un(i)*(1-A./(1+B*Q/(4*pi)).^C);
+#        rep_idx=find(Z==Z(idx_un(i))); % finding the repeating Z
+#        S(rep_idx,:) = repmat(S(idx_un(i),:),length(rep_idx),1);
+#    elseif Z_un(i)>95 
+#        error('Wrong atomic number in calculating the Compton scattering');
+#    end   
+#end
+#Sinc = sum(S,1);
+
+
+#def convolutedExpDecay(t, tau, tzero, fwhm):
+#    t = t - tzero
+#    sigma = fwhm/2.355
+#    val = sigma**2 - tau*t
+#    return ( 1/2 * np.exp( (sigma**2 - 2*tau*t) / (2*tau**2) )*
+#            (1 + (np.sign(-val) * erf(np.abs(val) / (np.sqrt(2)*sigma*tau)))) )
+#
+#
+#
+#def convolutedStep(t, tzero, fwhm):
+#    t = t - tzero
+#    sigma = fwhm/2.355
+#    val = t / (np.sqrt(2)*sigma)
+#    return (1/2 * (1 + erf(val)))
+
+
+
 class Cage:
     
     def __init__(self):
@@ -279,3 +368,13 @@ class Cage:
         gr_cage = {k: x/n_traj for k,x in gr_cage.items()}
         return r, gr_solute, gr_cage
 
+
+if __name__ == '__main__':
+    
+    q = np.linspace(0, 10, 101)
+#    s_inc = 
+    
+    plt.figure()
+    plt.plot(q, 2*Compton('C', q) + Compton('N', q))
+#    plt.plot(q, )
+    
