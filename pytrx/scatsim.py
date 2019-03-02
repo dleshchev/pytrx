@@ -15,7 +15,7 @@ import pkg_resources
 
 class Solute:
     
-    def __init__(self, inputStyle='ZXYZ_file', inputObj=None,
+    def __init__(self, inputStyle='XYZ_file', inputObj=None,
                  qRange=[0,10], nqpt=1001, modelLabels=None, printing=False):
         
         assert ((inputStyle == 'XYZ_file') or
@@ -42,20 +42,25 @@ class Solute:
         self.q = np.linspace(qRange[0], qRange[1], nqpt)
         listOfModels = inputObj
         self.s = np.zeros((self.q.size, len(listOfModels)))
+        self.f_self = np.zeros((self.q.size, len(listOfModels)))
+        self.f_sharp = np.zeros((self.q.size, len(listOfModels)))
+        self.gr = []
         
         if inputStyle == 'XYZ_file':
             for i, filepath in enumerate(listOfModels):
                 if printing: print('Calculating scattering for model', modelLabels[i])
                 model = self.FiletoZXYZ(filepath)
-                self.s[:, i] = self.DebyeScat_fromZXYZ(model, self.q)
+                self.s[:, i], self.f_self[:, i], self.f_sharp[:, i] = self.DebyeScat_fromZXYZ(model, self.q)
+                self.gr.append(self.ZXYZtoGR(model))
         
         elif inputStyle == 'XYZ_list':
             listOfModels = inputObj
             self.s = np.zeros((self.q.size, len(listOfModels)))
             for i, model in enumerate(listOfModels):
                 if printing: print('Calculating scattering for model', modelLabels[i])
-                self.s[:, i] = self.DebyeScat_fromZXYZ(model, self.q)
-        
+                self.s[:, i], self.f_self[:, i], self.f_sharp[:, i] = self.DebyeScat_fromZXYZ(model, self.q)
+                self.gr.append(self.ZXYZtoGR(model))
+                
         elif inputStyle == 'PDB_file':
             pass
         elif inputStyle == 'PDB_list':
@@ -81,11 +86,14 @@ class Solute:
         atomForm = self.getAtomicFormFactor(Elements, q)
                 
         S = np.zeros(q.shape)
+        f_self = np.zeros(q.shape)
+        f_sharp = np.zeros(q.shape)
         for i,item in enumerate(ZXYZ):
             xyz_i = np.array(item[1:])
             f_i = atomForm[item[0]]
             
             S += f_i**2
+            f_self += f_i**2
             
             for jtem in ZXYZ[:i]:
                 xyz_j = np.array(jtem[1:])
@@ -96,8 +104,9 @@ class Solute:
 #                S += 2 * f_i * f_j * np.sin( q * r_ij ) / ( q * r_ij )
                 S[q!=0] += 2*f_i[q!=0]*f_j[q!=0]*np.sin(q[q!=0]*r_ij)/(q[q!=0]*r_ij)
                 S[q==0] += 2*f_i[q==0]*f_j[q==0]
+                f_sharp += 2*f_i*f_j
         
-        return S
+        return S, f_self, f_sharp
         
     
     def ZXYZtoGR(self, ZXYZ, Rmax = 1e2, dR = 1e-2):
@@ -113,8 +122,9 @@ class Solute:
             xyz_i = np.array(list(x[1:] for x in ZXYZ if x[0]==item))
             for j,jtem in enumerate(Elements[:i+1]):
                 xyz_j = np.array(list(x[1:] for x in ZXYZ if x[0]==jtem))
-                dist = np.sqrt(np.subtract(xyz_i[:,[0]],xyz_j[:,[0]].T)**2 + \
-                               np.subtract(xyz_i[:,[1]],xyz_j[:,[1]].T)**2 + \
+#                print(xyz_i,xyz_j)
+                dist = np.sqrt(np.subtract(xyz_i[:,[0]],xyz_j[:,[0]].T)**2 + 
+                               np.subtract(xyz_i[:,[1]],xyz_j[:,[1]].T)**2 + 
                                np.subtract(xyz_i[:,[2]],xyz_j[:,[2]].T)**2).flatten()
                        
                 gr_ij = np.histogram(dist,r_bins)[0]
@@ -145,7 +155,15 @@ class Solute:
         
         return S
             
-        
+    
+    def getSR(self, r, alpha):
+        self.r = r.copy()
+        dq = self.q[1] - self.q[0]
+        x = self.q[None, :]*self.r[:, None]
+        self.rsr =  ((np.sin(x)*dq) @ ((self.s-self.f_self)/self.f_sharp * 
+                                       self.q[:, None] * 
+                                       np.exp(-alpha*self.q[:, None]**2)))
+    
     
     def getAtomicFormFactor(self,Elements,q):
         if type(Elements) == str: Elements = [Elements]
