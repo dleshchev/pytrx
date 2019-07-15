@@ -238,6 +238,59 @@ class Solute:
 
 
 
+
+### UTILS
+
+
+def formFactor(q, Elements):
+    '''
+    Calculates atomic form-factor at value q
+    q - np.array of scattering vector values
+    Elements - np.array or list of elements. May be a string if one wants to
+    compute form-factor for only one element.
+    
+    returns a dict of form factors
+    
+    Examples:
+    
+    q = np.arange(10)    
+    f = formFactor(q, 'Si')
+    print(f['Si'])
+    
+    Elements = ['Si', 'O']
+    f = formFactor(q, Elements)
+    print(f['Si'], f['O'])
+    '''
+    
+    if type(Elements) == str: Elements = [Elements]
+    
+    fname = pkg_resources.resource_filename('pytrx', './f0_WaasKirf.dat')
+    with open(fname) as f:
+        content = f.readlines()
+    
+    atomData = list()
+    for i,x in enumerate(content):
+        if x[0:2]=='#S':
+            atomName = x.rstrip().split()[-1]
+            if any([atomName==x for x in Elements]):
+                atomCoef = content[i+3].rstrip()
+                atomCoef = np.fromstring(atomCoef, sep=' ')
+                atomData.append([atomName, atomCoef])
+
+    atomData.sort(key=lambda x: Elements.index(x[0]))
+    
+    s = q/(4*pi)
+    formFunc = lambda s,a: (np.sum(np.reshape(a[:5],[5,1])*
+                                   np.exp(-a[6:,np.newaxis]*s**2),axis=0) + a[5])
+    
+    f = {}
+    for x in atomData:
+        f[x[0]] = formFunc(s, x[1])
+
+    return f
+
+
+
 def Compton(z, q):
     fname_lowz = pkg_resources.resource_filename('pytrx', './Compton_lowZ.dat')
     fname_highz = pkg_resources.resource_filename('pytrx', './Compton_highZ.dat')
@@ -285,7 +338,7 @@ def ElementString():
     ElementString = 'H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og'
     return ElementString.split()
     
-    
+
 #Scoh = AtomicFormFactorZ(Z,Q).^2;
 #S = zeros(size(Scoh));
 #[Z_un,idx_un,dummy]=unique(Z,'first');
@@ -392,7 +445,9 @@ if __name__ == '__main__':
     q = np.linspace(0, 10, 101)
 #    s_inc = 
     
-    plt.figure()
-    plt.plot(q, 2*Compton('C', q) + Compton('N', q))
-#    plt.plot(q, )
+    f = formFactor(q, ['Pt', 'Pt2+'])
     
+    plt.figure(1)
+    plt.clf()
+    plt.plot(q, f['Pt'])
+    plt.plot(q, f['Pt2+'])
