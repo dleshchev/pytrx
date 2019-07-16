@@ -240,6 +240,72 @@ class Solute:
 
 
 
+
+class Molecule:
+    def __init__(self, Z, xyz,
+                 calc_gr=False, rmin=0, rmax=25, dr=0.01):
+        if type(Z) == str:
+            Z = np.array([Z])
+        self.Z = Z
+        self.Z_num =np.array([z_str2num(z) for z in Z])
+        
+        self.xyz = xyz
+        self.calcDistMat()
+        
+        if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
+            
+        
+    def calcDistMat(self):
+        self.dist_mat = np.sqrt(np.sum((self.xyz[None, :, :] -
+                                        self.xyz[:, None, :])**2, axis=2))
+        
+        
+    def calcGR(self, rmin=0, rmax=25, dr=0.01):
+        self.gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
+        self.r = self.gr.r
+        for pair in self.gr.el_pairs:
+            el1, el2 = pair
+            idx1, idx2 = (el1==self.Z, el2==self.Z)
+            self.gr[pair] += np.histogram(self.dist_mat[np.ix_(idx1, idx2)].ravel(),
+                                          self.gr.r_bins)[0]
+            
+    def calcDens(self):
+        self.dens = self.gr.calcDens()
+            
+    
+    
+class GR:
+    def __init__(self, Z, rmin=0, rmax=25, dr=0.01):
+        self.Z = np.unique(Z)
+        
+        self.r = np.arange(rmin, rmax+dr, dr)
+        self.r_bins = np.arange(rmin-0.5*dr, rmax+1.5*dr, dr)
+        
+        self.gr = {}
+        self.el_pairs = [(z_i, z_j) for i, z_i in enumerate(self.Z) for z_j in self.Z[i:]]
+        for pair in self.el_pairs:
+            self.gr[frozenset(pair)] = np.zeros(self.r.size)
+        
+        
+    def __setitem__(self, key, data):
+        key = frozenset(key)
+        self.gr[key] = data
+    
+    
+    def __getitem__(self, key):
+        key = frozenset(key)
+        return self.gr[key]
+    
+    
+    def calcDens(self):
+        self.dens = np.zeros(self.r.shape)
+        for pair in self.el_pairs:
+            el1, el2 = pair
+            z1 = z_str2num(el1)
+            z2 = z_str2num(el2)
+            self.dens += z1*z2*self.gr[frozenset(pair)]
+
+
 ### UTILS
 
 
@@ -263,33 +329,61 @@ def formFactor(q, Elements):
     print(f['Si'], f['O'])
     '''
     
-    if type(Elements) == str: Elements = [Elements]
+    Elements = np.unique(Elements)    
     
     fname = pkg_resources.resource_filename('pytrx', './f0_WaasKirf.dat')
     with open(fname) as f:
         content = f.readlines()
     
-    atomData = list()
-    for i,x in enumerate(content):
-        if x[0:2]=='#S':
-            atomName = x.rstrip().split()[-1]
-            if any([atomName==x for x in Elements]):
-                atomCoef = content[i+3].rstrip()
-                atomCoef = np.fromstring(atomCoef, sep=' ')
-                atomData.append([atomName, atomCoef])
-
-    atomData.sort(key=lambda x: Elements.index(x[0]))
-    
     s = q/(4*pi)
-    formFunc = lambda s,a: (np.sum(np.reshape(a[:5],[5,1])*
-                                   np.exp(-a[6:,np.newaxis]*s**2),axis=0) + a[5])
+    formFunc = lambda sval, a: np.sum(a[None, :5]*np.exp(-a[None, 6:]*sval[:, None]**2), axis=1) + a[5]
     
     f = {}
-    for x in atomData:
-        f[x[0]] = formFunc(s, x[1])
-
+    for i,x in enumerate(content):
+        if x[0:2]=='#S':
+            atom = x.split()[-1]
+            if any([atom==x for x in Elements]):
+                coef = np.fromstring(content[i+3], sep='\t')
+                f[atom] = formFunc(s, coef)
+    
     return f
 
+
+def Debye(q, mol, f=None):
+    if f is None:
+        f = formFactor(q, mol.Z)
+    Scoh = np.zeros(q.shape)
+    for el1 in f.keys():
+        idx1 = el1 == mol.Z
+        
+        for el2 in f.keys():
+            idx2 = el2 == mol.Z
+            r12 = mol.dist_mat[np.ix_(idx1, idx2)].ravel()
+            qr12 = q[:, None]*r12[None, :]
+            qr12[qr12<1e-6] = 1e-6 # to deal with r an q == 0
+            Scoh += f[el1]*f[el2]*np.sum(np.sin(qr12)/qr12, axis=1)
+            
+    return Scoh
+        
+
+def DebyeFromGR(q, gr, f=None):
+    if f is None:
+        f = formFactor(q, gr.Z)
+    Scoh = np.zeros(q.shape)
+    qr = q[:, None]*gr.r[None, :]
+    qr[qr<1e-6] = 1e-6
+    Asin = np.sin(qr)/qr
+    
+    for pair in gr.el_pairs:
+        el1, el2 = pair
+        pair_scat = f[el1] * f[el2] * (Asin @ gr[pair])
+        if el1==el2:
+            Scoh += pair_scat
+        else:
+            Scoh += 2*pair_scat
+        
+    
+    return Scoh
 
 
 def Compton(z, q):
@@ -321,7 +415,8 @@ def Compton(z, q):
         print(z, 'not found')
     return S_inc
 
-    
+
+
 
 def z_num2str(z):
     return ElementString()[z-1]
@@ -340,30 +435,6 @@ def ElementString():
     return ElementString.split()
     
 
-#Scoh = AtomicFormFactorZ(Z,Q).^2;
-#S = zeros(size(Scoh));
-#[Z_un,idx_un,dummy]=unique(Z,'first');
-#for i=1:length(Z_un)
-#    if Z_un(i)>2 && Z_un(i)<37
-#        idx = find(Alow(:,1)==Z_un(i));
-#        M=Alow(idx,2);K=Alow(idx,3);L=Alow(idx,4);
-#        S(idx_un(i),:) = (Z_un(i)-Scoh(idx_un(i),:)/Z_un(i)).*...
-#                        (1-M*(exp(-K*Q/(4*pi))-exp(-L*Q/(4*pi))));
-#        rep_idx=find(Z==Z(idx_un(i))); % finding the repeating Z
-#        S(rep_idx,:) = repmat(S(idx_un(i),:),length(rep_idx),1);
-#    elseif Z_un(i)>36 && Z_un(i)<96
-#        idx = find(Ahigh(:,1)==Z_un(i));
-#        A=Ahigh(idx,2);B=Ahigh(idx,3);C=Ahigh(idx,4);
-#        S(idx_un(i),:) = Z_un(i)*(1-A./(1+B*Q/(4*pi)).^C);
-#        rep_idx=find(Z==Z(idx_un(i))); % finding the repeating Z
-#        S(rep_idx,:) = repmat(S(idx_un(i),:),length(rep_idx),1);
-#    elseif Z_un(i)>95 
-#        error('Wrong atomic number in calculating the Compton scattering');
-#    end   
-#end
-#Sinc = sum(S,1);
-
-
 #def convolutedExpDecay(t, tau, tzero, fwhm):
 #    t = t - tzero
 #    sigma = fwhm/2.355
@@ -381,74 +452,98 @@ def ElementString():
 
 
 
-class Cage:
-    
-    def __init__(self):
-        pass
-    
-    
-        
-    def ZXYZtoGR_cage(self, ZXYZ, n_solute, Rmax = 1e2, dR = 1e-2):
-        
-        ZXYZ_solute, ZXYZ_solvent = ZXYZ[:n_solute], ZXYZ[n_solute:]
-        Elements_solute = self.getElements(ZXYZ_solute)
-        Elements_solvent = self.getElements(ZXYZ_solvent)
-        Rpts = Rmax/dR
-        
-        r = np.linspace(0,Rmax,Rpts+1)
-        r_bins = np.linspace(-dR/2, Rmax+dR/2, Rpts+2)
-        
-        gr = {}
-        for i,item in enumerate(Elements_solute):
-            xyz_i = np.array(list(x[1:] for x in ZXYZ_solute if x[0]==item))
-            for j,jtem in enumerate(Elements_solvent):
-                xyz_j = np.array(list(x[1:] for x in ZXYZ_solvent if x[0]==jtem))
-                dist = np.sqrt(np.subtract(xyz_i[:,[0]],xyz_j[:,[0]].T)**2 + \
-                               np.subtract(xyz_i[:,[1]],xyz_j[:,[1]].T)**2 + \
-                               np.subtract(xyz_i[:,[2]],xyz_j[:,[2]].T)**2).flatten()
-                
-                gr_ij = np.histogram(dist,r_bins)[0]
-                gr[item+'-'+jtem] = gr_ij
-                
-        return r, gr    
-
-
-        
-    def TrajectoriesToGR(self, folderpath, n_head, n_solute, n_atoms, Rmax = 1e2, dR = 1e-2):
-        n_traj = 0
-        r, gr_solute, gr_cage = 0, {}, {}
-        for file in os.listdir(folderpath):
-            with open(folderpath+file) as f:
-                while True:
-                    MD_snapshot = list(islice(f, n_head + n_atoms))
-                    if not MD_snapshot:
-                        break        
-                    
-                    ZXYZ_all    = list([ x.split()[0], float(x.split()[1]), float(x.split()[2]), float(x.split()[3]) ] for x in MD_snapshot[n_head:])
-                    ZXYZ_solute = list([ x.split()[0], float(x.split()[1]), float(x.split()[2]), float(x.split()[3]) ] for x in MD_snapshot[n_head:n_head+n_solute])
-                    
-                    r, gr_solute_upd = self.ZXYZtoGR(ZXYZ_solute, Rmax, dR)               
-                    gr_solute = { k: gr_solute.get(k, 0) + gr_solute_upd.get(k, 0) for k in set(gr_solute) | set(gr_solute_upd) }
-                    
-                    r, gr_cage_upd = self.ZXYZtoGR_cage(ZXYZ_all, n_solute, Rmax, dR)
-                    gr_cage = { k: gr_cage.get(k, 0) + gr_cage_upd.get(k, 0) for k in set(gr_cage) | set(gr_cage_upd) }
-                    
-                    n_traj += 1
-                    print('Number of processed frames: ', n_traj)
-                    
-        gr_solute = {k: x/n_traj for k,x in gr_solute.items()}
-        gr_cage = {k: x/n_traj for k,x in gr_cage.items()}
-        return r, gr_solute, gr_cage
-
 
 if __name__ == '__main__':
     
-    q = np.linspace(0, 10, 101)
-#    s_inc = 
+#    Z = np.array(['I', 'I', 'Br'])
     
-    f = formFactor(q, ['Pt', 'Pt2+'])
+    d = 3
     
-    plt.figure(1)
-    plt.clf()
-    plt.plot(q, f['Pt'])
-    plt.plot(q, f['Pt2+'])
+    nx, ny, nz = 50, 50, 5
+    
+    xyz = np.array([np.arange(nx), np.zeros(nx), np.zeros(nx)]).T
+    xyz_single_array = xyz.copy()
+    
+    for i in range(1,ny):
+        dy = np.array([0, 1, 0])
+        xyz_new_y = xyz_single_array + dy[None,:]*i
+        
+        xyz = np.vstack((xyz, xyz_new_y))
+        
+    xyz_single_sheet = xyz.copy()
+    for i in range(1,nz):
+        dy = np.array([0, 0, 1])
+        xyz_new_y = xyz_single_sheet + dy[None,:]*i
+        
+        xyz = np.vstack((xyz, xyz_new_y))
+    
+    xyz *= d
+    
+    xyz -= np.mean(xyz, axis=0)
+    Z = np.array(['Si']*xyz.shape[0])
+    
+    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.05, rmax=1000)
+    
+    q = np.linspace(0, 10, 1001)
+    
+    from mpl_toolkits.mplot3d import Axes3D
+    fig = plt.figure(1)
+    fig.clf()
+    ax1 = fig.add_subplot(221, projection='3d')
+    
+    ax1.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], '.', color='k')
+    
+    ax1.set_xlim(-15*d, 15*d)
+    ax1.set_ylim(-15*d, 15*d)
+    ax1.set_zlim(-15*d, 15*d)
+    
+    ax2 = fig.add_subplot(222)
+    ax2.plot(mol1.r, mol1.gr[('Si', 'Si')])
+    
+    s_coh = DebyeFromGR(q, mol1.gr)
+    
+    ax3 = fig.add_subplot(223)
+    ax3.semilogy(q, s_coh)
+    ax3.set_xlim(1e-3, 1)
+    
+    ax4 = fig.add_subplot(224)
+    ax4.plot(q, s_coh)
+    ax4.set_xlim(1, 4)
+    ax4.set_ylim(0, s_coh[q>1].max())
+    
+    
+    
+#    xyz = np.array([[0.00, 0.0, 0.0],
+#                    [2.67, 0.0, 0.0],
+#                    [6.67, 0.0, 0.0]])
+#    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.01)
+#    mol1.gr.calcDens()
+#    
+#    
+#    plt.figure(1)
+#    plt.clf()
+#    plt.subplot(211)
+#    
+#    plt.plot()
+    
+#    plt.plot(mol1.r, mol1.gr[('I', 'Br')])
+#    
+#    plt.subplot(212)
+##    plt.plot(mol1.gr.r, mol1.gr.edens)
+#    plt.plot(q, Debye(q, mol1), '.-')
+#    plt.plot(q, DebyeFromGR(q, mol1.gr))
+
+
+#    toygr = GR(Z)
+    
+#    print(toygr.r, toygr[('O','Pt')])
+    
+#    q = np.linspace(0, 10, 101)
+##    s_inc = 
+#    
+#    f = formFactor(q, ['Pt', 'Pt2+'])
+#    
+#    plt.figure(1)
+#    plt.clf()
+#    plt.plot(q, f['Pt'])
+#    plt.plot(q, f['Pt2+'])
