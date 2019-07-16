@@ -126,7 +126,8 @@ class Solute:
                 dist = np.sqrt(np.subtract(xyz_i[:,[0]],xyz_j[:,[0]].T)**2 + 
                                np.subtract(xyz_i[:,[1]],xyz_j[:,[1]].T)**2 + 
                                np.subtract(xyz_i[:,[2]],xyz_j[:,[2]].T)**2).flatten()
-                       
+                
+#                print(r_bins.min(), r_bins.max())
                 gr_ij = np.histogram(dist,r_bins)[0]
                 if item!=jtem:
                     gr[item+'-'+jtem] = 2*gr_ij
