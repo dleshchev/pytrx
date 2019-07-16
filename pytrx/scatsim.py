@@ -443,9 +443,12 @@ class Cage:
 if __name__ == '__main__':
     
     q = np.linspace(0, 10, 101)
+
+    
+
 #    s_inc = 
     
-    f = formFactor(q, ['Pt', 'Pt2+'])
+#    f = formFactor(q, ['Pt', 'Pt2+'])
     
     plt.figure(1)
     plt.clf()
