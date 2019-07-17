@@ -212,7 +212,6 @@ class ScatData:
 
 
     def _identifyExistingFiles(self, logFileStyle):
-        print('*** Checking if all the files/images exist ***')
         idxToDel = []
         for i, row in self.logData.iterrows():
             if logFileStyle == 'id09':
@@ -337,7 +336,7 @@ class ScatData:
                                                     polarization_factor = 1,
                                                     mask = maskImage,
                                                     unit = "q_A^-1"  )
-            self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
+#            self.total.s[:,i] = self.total.s_raw[:,i]/self.total.normInt[i]
             
             if i==0: self.imageAv = image
             else: self.imageAv += image
@@ -365,7 +364,9 @@ class ScatData:
         if correctSample:
             Tsample = self._getSampleAbsorptionCorrection(musample, lsample, self.tth/180*pi)
             Corrections *= Tsample
-        self.total.s = self.total.s*Corrections[:, np.newaxis]
+#        print(Corrections)
+#        self.total.s = self.total.s*Corrections[:, np.newaxis]
+        self.total.s_raw *= Corrections[:, np.newaxis]
         
         self.total.normInt, self.total.s = normalizeQ(q, self.total.s_raw, qNormRange)
         self.imageAv = self.imageAv/(i+1)
