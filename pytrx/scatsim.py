@@ -250,7 +250,6 @@ class Molecule:
         self.Z_num =np.array([z_str2num(z) for z in Z])
         
         self.xyz = xyz
-        self.calcDistMat()
         
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
             
@@ -261,6 +260,7 @@ class Molecule:
         
         
     def calcGR(self, rmin=0, rmax=25, dr=0.01):
+        self.calcDistMat()
         self.gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
         self.r = self.gr.r
         for pair in self.gr.el_pairs:
@@ -270,8 +270,8 @@ class Molecule:
                                           self.gr.r_bins)[0]
             
     def calcDens(self):
-        self.dens = self.gr.calcDens()
-            
+        self.gr.calcDens()
+        self.dens = self.gr.dens    
     
     
 class GR:
@@ -304,6 +304,70 @@ class GR:
             z1 = z_str2num(el1)
             z2 = z_str2num(el2)
             self.dens += z1*z2*self.gr[frozenset(pair)]
+
+
+class Ensemble:
+    def __init__(self, targetMolecule, n_mol=100):
+        self.Z = targetMolecule.Z
+        self.xyz_t = targetMolecule.xyz
+        
+        self.n_atom = self.xyz_t.shape[0]
+        self.n_mol = n_mol
+        
+        self.xyz = np.tile(self.xyz_t, (n_mol, 1, 1))
+        
+        
+    def calcDistMat(self, subset=None):
+        if subset is None: subset = np.arange(self.n_mol)
+        self.dist_mat = np.sqrt(np.sum((self.xyz[subset, None, :, :] - 
+                                        self.xyz[subset, :, None, :])**2, axis=3))
+        
+        
+    def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset='all'):
+        self.calcDistMat(subset=subset)
+        n_subset = self.dist_mat.shape[0]
+        gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
+        if not hasattr(self, 'r'): self.r = gr.r
+        
+        for pair in gr.el_pairs:
+            el1, el2 = pair
+            idx1, idx2 = (el1==self.Z, el2==self.Z)
+            idx_grid = np.ix_(np.ones(n_subset, dtype='bool'), idx1, idx2)
+            gr[pair] += np.histogram(self.dist_mat[idx_grid].ravel(), gr.r_bins)[0]
+        
+        return gr
+    
+    
+    def calcGR(self, rmin=0, rmax=25, dr=0.01):
+        self.gr = self._computeGR(rmin=rmin, rmax=rmax, dr=dr, subset=None)
+        
+    
+    def perturb(self, amplitude, idx_mol=None, idx_atom=None):
+        if idx_mol is None: idx_mol = np.arange(self.n_mol)
+        if idx_atom is None: idx_atom = np.arange(self.n_atom)
+        
+        m_mol = idx_mol.size
+        m_atom = idx_atom.size
+        dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
+#        idx = np.ix_()
+#        print(self.xyz.shape, idx_mol.shape, idx_atom.shape)
+#        print(self.xyz[idx_mol[], idx_atom, :].shape)
+        self.xyz[idx_mol[:, None], idx_atom, :] += dxyz
+    
+    
+    def calcStructDeviation(self, subset=None):
+        if subset is None: subset = np.arange(self.n_mol)
+        
+        return np.sum((self.xyz[subset, :, :] - self.xyz_t[None, :, :])**2)
+    
+#    def calcDens(self):
+#        self.gr.calcDens()
+#        self.dens = self.gr.dens    
+    
+        
+
+
+
 
 
 ### UTILS
@@ -353,6 +417,7 @@ def Debye(q, mol, f=None):
     if f is None:
         f = formFactor(q, mol.Z)
     Scoh = np.zeros(q.shape)
+    mol.calcDistMat()
     for el1 in f.keys():
         idx1 = el1 == mol.Z
         
@@ -386,6 +451,15 @@ def DebyeFromGR(q, gr, f=None):
     return Scoh
 
 
+def ScatFromDens(q, gr):
+    gr.calcDens()
+    qr = q[:, None]*gr.r[None, :]
+    qr[qr<1e-6] = 1e-6
+    Asin = np.sin(qr)/qr
+    return Asin @ gr.dens
+    
+    
+
 def Compton(z, q):
     fname_lowz = pkg_resources.resource_filename('pytrx', './Compton_lowZ.dat')
     fname_highz = pkg_resources.resource_filename('pytrx', './Compton_highZ.dat')
@@ -416,11 +490,26 @@ def Compton(z, q):
     return S_inc
 
 
-
+def fromXYZ(filename, n_header=0):
+    Z = []
+    xyz = []
+    with open(filename) as f:
+        for line in f.readlines():
+            values = line.split()
+            if (line[0] != '#') and (len(values)==4):
+                Z.append(values[0])
+                xyz.append([float(i) for i in values[1:]])
+    xyz = np.array(xyz)
+    Z = np.array(Z)
+    return Molecule(Z, xyz)
+            
+    
+def FiletoZXYZ(filepath):
+    ZXYZ = pd.read_csv(filepath, names=['Z', 'x', 'y', 'z'], sep='\s+')
+    return ZXYZ
 
 def z_num2str(z):
     return ElementString()[z-1]
-
 
 
 def z_str2num(z):
@@ -428,8 +517,7 @@ def z_str2num(z):
         if el == z:
             return i+1
 
-    
-
+   
 def ElementString():
     ElementString = 'H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og'
     return ElementString.split()
@@ -454,96 +542,133 @@ def ElementString():
 
 
 if __name__ == '__main__':
+    np.random.seed(100)
+    import timeit
     
+#    Z = np.array(['I', 'I', 'I', 'Br'])
+#    
+#    xyz = np.array([[0.00, 0.0, 0.0],
+#                    [2.67, 0.0, 0.0],
+#                    [6.67, 0.0, 0.0],
+#                    [0.00, 3.0, 0.0]])
+#    
 #    Z = np.array(['I', 'I', 'Br'])
-    
-    d = 3
-    
-    nx, ny, nz = 50, 50, 5
-    
-    xyz = np.array([np.arange(nx), np.zeros(nx), np.zeros(nx)]).T
-    xyz_single_array = xyz.copy()
-    
-    for i in range(1,ny):
-        dy = np.array([0, 1, 0])
-        xyz_new_y = xyz_single_array + dy[None,:]*i
-        
-        xyz = np.vstack((xyz, xyz_new_y))
-        
-    xyz_single_sheet = xyz.copy()
-    for i in range(1,nz):
-        dy = np.array([0, 0, 1])
-        xyz_new_y = xyz_single_sheet + dy[None,:]*i
-        
-        xyz = np.vstack((xyz, xyz_new_y))
-    
-    xyz *= d
-    
-    xyz -= np.mean(xyz, axis=0)
-    Z = np.array(['Si']*xyz.shape[0])
-    
-    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.05, rmax=1000)
-    
-    q = np.linspace(0, 10, 1001)
-    
-    from mpl_toolkits.mplot3d import Axes3D
-    fig = plt.figure(1)
-    fig.clf()
-    ax1 = fig.add_subplot(221, projection='3d')
-    
-    ax1.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], '.', color='k')
-    
-    ax1.set_xlim(-15*d, 15*d)
-    ax1.set_ylim(-15*d, 15*d)
-    ax1.set_zlim(-15*d, 15*d)
-    
-    ax2 = fig.add_subplot(222)
-    ax2.plot(mol1.r, mol1.gr[('Si', 'Si')])
-    
-    s_coh = DebyeFromGR(q, mol1.gr)
-    
-    ax3 = fig.add_subplot(223)
-    ax3.semilogy(q, s_coh)
-    ax3.set_xlim(1e-3, 1)
-    
-    ax4 = fig.add_subplot(224)
-    ax4.plot(q, s_coh)
-    ax4.set_xlim(1, 4)
-    ax4.set_ylim(0, s_coh[q>1].max())
-    
-    
-    
+#    
 #    xyz = np.array([[0.00, 0.0, 0.0],
 #                    [2.67, 0.0, 0.0],
 #                    [6.67, 0.0, 0.0]])
-#    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.01)
-#    mol1.gr.calcDens()
-#    
-#    
-#    plt.figure(1)
-#    plt.clf()
-#    plt.subplot(211)
-#    
-#    plt.plot()
-    
-#    plt.plot(mol1.r, mol1.gr[('I', 'Br')])
-#    
-#    plt.subplot(212)
-##    plt.plot(mol1.gr.r, mol1.gr.edens)
-#    plt.plot(q, Debye(q, mol1), '.-')
-#    plt.plot(q, DebyeFromGR(q, mol1.gr))
 
-
-#    toygr = GR(Z)
+#    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.01)    
+    fname1 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-LS-opt-PBE-TZVP-COSMO.xyz'
+    fname2 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-HS-opt-PBE-TZVP-COSMO.xyz'
     
-#    print(toygr.r, toygr[('O','Pt')])
+    mol1 = fromXYZ(fname1)
+    mol2 = fromXYZ(fname2)
     
-#    q = np.linspace(0, 10, 101)
-##    s_inc = 
+    n_mol=100
+    ens1 = Ensemble(mol1, n_mol=n_mol)
+    ens1.perturb(0.1)
+    ens1.calcGR(dr=0.01)
+    
+    ens2 = Ensemble(mol2, n_mol=n_mol)
+    ens2.perturb(0.1)
+    ens2.calcGR(dr=0.01)
+    
+    ens1.calcStructDeviation()
+    
+    
+#    mol1.calcGR(dr=0.01)
+#    mol2.calcGR(dr=0.01)
+#
+#    mol1.calcDens()
+#    mol2.calcDens()
 #    
-#    f = formFactor(q, ['Pt', 'Pt2+'])
+    q = np.linspace(3, 12, 901)
+    ff = formFactor(q, ens1.Z)
+    
+    DebyeFromGR(q, ens1.gr, f=ff)
+    
+    
+    plt.figure(1)
+    plt.clf()
+    plt.subplot(211)
+    plt.plot(ens1.r, ens1.gr[('Co','N')])
+    plt.plot(ens2.r, ens2.gr[('Co','N')])
+    
+    
+#    plt.plot(mol1.r, mol1.gr[('C', 'C')])
+##    plt.plot(mol1.r, mol1.dens)
+##    plt.plot(mol1.r, mol2.dens)
+#    plt.plot(mol1.r, mol2.dens-mol1.dens)
 #    
-#    plt.figure(1)
-#    plt.clf()
-#    plt.plot(q, f['Pt'])
-#    plt.plot(q, f['Pt2+'])
+#    
+    plt.subplot(212)
+#    plt.plot(mol1.gr.r, mol1.gr.edens)
+##    plt.plot(q, Debye(q, mol1), '.-')
+##    plt.plot(q, DebyeFromGR(q, mol1.gr))
+#    
+    plt.plot(q, (Debye(q, mol2) - Debye(q, mol1)), '.-')
+    plt.plot(q, 1/n_mol*(DebyeFromGR(q, ens2.gr) - DebyeFromGR(q, ens1.gr)))
+#    plt.plot(q, (ScatFromDens(q, mol2.gr) - ScatFromDens(q, mol1.gr)))
+    
+    
+    
+    
+    
+# Test for 2D lattice    
+#    d = 3
+#    
+#    nx, ny, nz = 50, 50, 5
+#    
+#    xyz = np.array([np.arange(nx), np.zeros(nx), np.zeros(nx)]).T
+#    xyz_single_array = xyz.copy()
+#    
+#    for i in range(1,ny):
+#        dy = np.array([0, 1, 0])
+#        xyz_new_y = xyz_single_array + dy[None,:]*i
+#        
+#        xyz = np.vstack((xyz, xyz_new_y))
+#        
+#    xyz_single_sheet = xyz.copy()
+#    for i in range(1,nz):
+#        dy = np.array([0, 0, 1])
+#        xyz_new_y = xyz_single_sheet + dy[None,:]*i
+#        
+#        xyz = np.vstack((xyz, xyz_new_y))
+#    
+#    xyz *= d
+#    
+#    xyz -= np.mean(xyz, axis=0)
+#    Z = np.array(['Si']*xyz.shape[0])
+#    
+#    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.05, rmax=1000)
+#    
+#    q = np.linspace(0, 10, 1001)
+#    
+#    from mpl_toolkits.mplot3d import Axes3D
+#    fig = plt.figure(1)
+#    fig.clf()
+#    ax1 = fig.add_subplot(221, projection='3d')
+#    
+#    ax1.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], '.', color='k')
+#    
+#    ax1.set_xlim(-15*d, 15*d)
+#    ax1.set_ylim(-15*d, 15*d)
+#    ax1.set_zlim(-15*d, 15*d)
+#    
+#    ax2 = fig.add_subplot(222)
+#    ax2.plot(mol1.r, mol1.gr[('Si', 'Si')])
+#    
+#    s_coh = DebyeFromGR(q, mol1.gr)
+#    
+#    ax3 = fig.add_subplot(223)
+#    ax3.semilogy(q, s_coh)
+#    ax3.set_xlim(1e-3, 1)
+#    
+#    ax4 = fig.add_subplot(224)
+#    ax4.plot(q, s_coh)
+#    ax4.set_xlim(1, 4)
+#    ax4.set_ylim(0, s_coh[q>1].max())
+#    
+    
+    
