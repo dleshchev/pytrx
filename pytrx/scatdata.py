@@ -25,6 +25,8 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from scipy.ndimage import median_filter
 import scipy.signal as signal
+from scipy import sparse
+
 import h5py
 
 import pyFAI
@@ -527,7 +529,7 @@ class ScatData:
 
     
     def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage', 
-                       dezinger=True, renormalize=False, qNormRange=None):
+                       renormalize=False, qNormRange=None):
         ''' Method for calculating differences.
         
         You will need:
@@ -571,38 +573,37 @@ class ScatData:
         self.diff.timeStamp = np.array([])
         self.diff.timeStamp_str = np.array([])
         
-        idx_to_use = [] # indexes for clean-up
+        Adiff = sparse.eye(self.nFiles).tocsr()
         
         for i in range(self.nFiles):
             
-            s_tbs = None
             idx_next = self._findOffIdx(i, 'Next')
             idx_prev = self._findOffIdx(i, 'Prev')
             
             if subtractFlag == 'Next':
                 if idx_next:
-                    s_tbs = self.total.s[:, idx_next]
-            
+                    Adiff[i, idx_next] = -1
+                    
             elif subtractFlag == 'Previous':
                 if idx_prev:
-                    s_tbs = self.total.s[:, idx_prev]
+                    Adiff[i, idx_prev] = -1
             
             elif subtractFlag == 'Closest':
                 if self.total.delay_str[i] == self.diff.toff_str: # this is to avoid getting the same differences
                     if idx_next:
-                        s_tbs = self.total.s[:, idx_next]
+                        Adiff[i, idx_next] = -1
                 else:
                     if (idx_next) and (idx_prev):
                         timeToNext = np.abs(self.total.timeStamp[i] - self.total.timeStamp[idx_next])
                         timeToPrev = np.abs(self.total.timeStamp[i] - self.total.timeStamp[idx_prev])
                         if timeToNext <= timeToPrev:
-                            s_tbs = self.total.s[:, idx_next]
+                            Adiff[i, idx_next] = -1
                         else:
-                            s_tbs = self.total.s[:, idx_prev]
+                            Adiff[i, idx_prev] = -1
                     elif (idx_next) and (not idx_prev):
-                        s_tbs = self.total.s[:, idx_next]
+                        Adiff[i, idx_next] = -1
                     elif (not idx_next) and (idx_prev):
-                        s_tbs = self.total.s[:, idx_prev]
+                        Adiff[i, idx_prev] = -1
                         
             elif subtractFlag == 'MovingAverage':
                 if (idx_next) and (idx_prev):
@@ -612,24 +613,21 @@ class ScatData:
                                         self.total.timeStamp[idx_prev])
                     timeDiff = np.abs(self.total.timeStamp[idx_next] - 
                                       self.total.timeStamp[idx_prev])
-                    w_next = timeToPrev/timeDiff
-                    w_prev = timeToNext/timeDiff
-                    s_tbs = (w_next*self.total.s[:, idx_next] + 
-                             w_prev*self.total.s[:, idx_prev])
-                elif (idx_next) and (not idx_prev):
-                    s_tbs = self.total.s[:, idx_next]
-                elif (not idx_next) and (idx_prev):
-                    s_tbs = self.total.s[:, idx_prev]
+                    Adiff[i, idx_next] = -timeToPrev/timeDiff
+                    Adiff[i, idx_prev] = -timeToNext/timeDiff
                     
-            if s_tbs is not None:
-                idx_to_use.append(i)
-                ds_loc = self.total.s[:, i] - s_tbs
-                if dezinger:
-                    ds_loc = medianDezinger1d(ds_loc)
-                self.diff.ds[:,i] = ds_loc
+                elif (idx_next) and (not idx_prev):
+                    Adiff[i, idx_next] = -1
+                    
+                elif (not idx_next) and (idx_prev):
+                    Adiff[i, idx_prev] = -1
+              
+        idx_to_use = np.ravel((np.sum(Adiff, axis=1)<1e-6)) # argument of np.ravel is of matrix type which has ravel method working differently from np.ravel; we need np.ravel!
+        self.diff.ds = (Adiff @ self.total.s.T).T
+        print(Adiff.shape, self.diff.ds.shape, idx_to_use.shape)
         
-        self.diff.ds = self.diff.ds[:, idx_to_use] # clean-up
-        
+        # clean-up        
+        self.diff.ds = self.diff.ds[:, idx_to_use]
         self.diff.delay = self.total.delay[idx_to_use]
         self.diff.delay_str = self.total.delay_str[idx_to_use]
         self.diff.timeStamp = self.total.timeStamp[idx_to_use]
@@ -638,6 +636,7 @@ class ScatData:
         self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)                
         print('')  
         print('*** Done with the difference curves ***')
+        return Adiff
     
     
     
@@ -653,7 +652,8 @@ class ScatData:
             if (idx<0) or idx>(self.nFiles-1):
                 return None
             if ((self.total.delay_str[idx] == self.diff.toff_str) and # find next/prev reference
-                (self.total.scanStamp[idx] == self.total.scanStamp[idx_start])): # should be in the same scan
+                (self.total.scanStamp[idx] == self.total.scanStamp[idx_start])): # and # should be in the same scan
+#                (not self.total.isOutlier[idx])): # should not be an outlier
                 return idx
 
 
