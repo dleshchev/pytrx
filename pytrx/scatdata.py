@@ -26,6 +26,7 @@ from matplotlib import pyplot as plt
 from scipy.ndimage import median_filter
 import scipy.signal as signal
 from scipy import sparse
+from covar import cov_shrink_ss
 
 import h5py
 
@@ -494,7 +495,9 @@ class ScatData:
 
     def getTotalAverages(self, fraction=0.9, chisqThresh=5,
                               q_break=None, chisqThresh_lowq=5, chisqThresh_highq=5,
-                              plotting=True, chisqHistMax=10, y_offset='auto'):
+                              plotting=True, chisqHistMax=10, y_offset=None,
+                              dezinger=True, dezingerThresh=5,
+                              estimateCov=False, useCovShrinkage=True, covShrinkage=None):
         ''' Method calculates the total averages and gets rid of nasty outliers.
         It uses a chisq-based method for detecting outliers (see getAverage aux
         method).
@@ -516,12 +519,16 @@ class ScatData:
         chisqHistMax - maximum value of chisq you want to plot histograms
         '''
         print('*** Averaging the total curves ***')
-        self.total.s_av, self.total.s_err, self.total.isOutlier = \
-          getAverage(self.q, self.total.delay_str, self.total.s, self.t_str,
+        self.total.s_av, _, self.total.isOutlier, _, _, self.total.chisq = \
+          getAverage(self.q, self.total.s, np.eye(self.total.s.shape[1]),
+                     self.total.isOutlier, self.total.delay_str, self.t_str, None,
                      fraction, chisqThresh,
                      q_break, chisqThresh_lowq, chisqThresh_highq,
-                     plotting, chisqHistMax, y_offset)
+                     plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset,
+                     dezinger=dezinger, dezingerThresh=dezingerThresh,
+                     estimateCov=estimateCov, useCovShrinkage=useCovShrinkage, covShrinkage=covShrinkage)
         print('*** Done ***')
+        
 
 
 # 3. Difference calculation
@@ -573,7 +580,7 @@ class ScatData:
         self.diff.timeStamp = np.array([])
         self.diff.timeStamp_str = np.array([])
         
-        Adiff = sparse.eye(self.nFiles).tocsr()
+        self.diff.Adiff = sparse.eye(self.nFiles).tolil()
         
         for i in range(self.nFiles):
             
@@ -582,28 +589,28 @@ class ScatData:
             
             if subtractFlag == 'Next':
                 if idx_next:
-                    Adiff[i, idx_next] = -1
+                    self.diff.Adiff[i, idx_next] = -1
                     
             elif subtractFlag == 'Previous':
                 if idx_prev:
-                    Adiff[i, idx_prev] = -1
+                    self.diff.Adiff[i, idx_prev] = -1
             
             elif subtractFlag == 'Closest':
                 if self.total.delay_str[i] == self.diff.toff_str: # this is to avoid getting the same differences
                     if idx_next:
-                        Adiff[i, idx_next] = -1
+                        self.diff.Adiff[i, idx_next] = -1
                 else:
                     if (idx_next) and (idx_prev):
                         timeToNext = np.abs(self.total.timeStamp[i] - self.total.timeStamp[idx_next])
                         timeToPrev = np.abs(self.total.timeStamp[i] - self.total.timeStamp[idx_prev])
                         if timeToNext <= timeToPrev:
-                            Adiff[i, idx_next] = -1
+                            self.diff.Adiff[i, idx_next] = -1
                         else:
-                            Adiff[i, idx_prev] = -1
+                            self.diff.Adiff[i, idx_prev] = -1
                     elif (idx_next) and (not idx_prev):
-                        Adiff[i, idx_next] = -1
+                        self.diff.Adiff[i, idx_next] = -1
                     elif (not idx_next) and (idx_prev):
-                        Adiff[i, idx_prev] = -1
+                        self.diff.Adiff[i, idx_prev] = -1
                         
             elif subtractFlag == 'MovingAverage':
                 if (idx_next) and (idx_prev):
@@ -613,30 +620,26 @@ class ScatData:
                                         self.total.timeStamp[idx_prev])
                     timeDiff = np.abs(self.total.timeStamp[idx_next] - 
                                       self.total.timeStamp[idx_prev])
-                    Adiff[i, idx_next] = -timeToPrev/timeDiff
-                    Adiff[i, idx_prev] = -timeToNext/timeDiff
+                    self.diff.Adiff[i, idx_next] = -timeToPrev/timeDiff
+                    self.diff.Adiff[i, idx_prev] = -timeToNext/timeDiff
                     
                 elif (idx_next) and (not idx_prev):
-                    Adiff[i, idx_next] = -1
+                    self.diff.Adiff[i, idx_next] = -1
                     
                 elif (not idx_next) and (idx_prev):
-                    Adiff[i, idx_prev] = -1
+                    self.diff.Adiff[i, idx_prev] = -1
               
-        idx_to_use = np.ravel((np.sum(Adiff, axis=1)<1e-6)) # argument of np.ravel is of matrix type which has ravel method working differently from np.ravel; we need np.ravel!
-        self.diff.ds = (Adiff @ self.total.s.T).T
-        print(Adiff.shape, self.diff.ds.shape, idx_to_use.shape)
+        self.diff.ds = (self.diff.Adiff @ self.total.s.T).T
+         
+        self.diff.delay = self.total.delay
+        self.diff.delay_str = self.total.delay_str
+        self.diff.timeStamp = self.total.timeStamp
+        self.diff.timeStamp_str = self.total.timeStamp_str
+        self.diff.scanStamp = self.total.scanStamp
         
-        # clean-up        
-        self.diff.ds = self.diff.ds[:, idx_to_use]
-        self.diff.delay = self.total.delay[idx_to_use]
-        self.diff.delay_str = self.total.delay_str[idx_to_use]
-        self.diff.timeStamp = self.total.timeStamp[idx_to_use]
-        self.diff.timeStamp_str = self.total.timeStamp_str[idx_to_use]
-        self.diff.scanStamp = self.total.scanStamp[idx_to_use]
-        self.diff.isOutlier = np.zeros(self.diff.delay.shape, dtype = bool)                
+        self.diff.isOutlier = np.ravel((np.sum(self.diff.Adiff, axis=1)>1e-6)) # argument of np.ravel is of matrix type which has ravel method working differently from np.ravel; we need np.ravel!
         print('')  
         print('*** Done with the difference curves ***')
-        return Adiff
     
     
     
@@ -662,22 +665,37 @@ class ScatData:
 
 
 
-    def getDiffAverages(self, fraction=0.9, chisqThresh=1.5,
+    def getDiffAverages(self, weightedAveraging=False, fraction=0.9, chisqThresh=1.5,
                         q_break=None, chisqThresh_lowq=1.5, chisqThresh_highq=1.5,
-                        plotting=True, chisqHistMax = 10, y_offset='auto'):
+                        plotting=False, chisqHistMax=10, y_offset=None,
+                        dezinger=True, dezingerThresh=5,
+                        estimateCov = True, useCovShrinkage=True, covShrinkage=None):
         ''' Method to get average differences. It works in the same way as
         getTotalAverages, so refer to the information on input/output in the
         getTotalAverages docstring.
         '''
         print('*** Averaging the difference curves ***')
-        self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier = \
-        getAverage(self.q, self.diff.delay_str, self.diff.ds, self.t_str,
+        
+        if weightedAveraging:
+            weights = 1/self.total.normInt
+            weights /= np.median(weights)
+            self.diff.covii = self.diff.Adiff @ np.diag(weights) @ self.diff.Adiff.T
+        else:
+            self.diff.covii = self.diff.Adiff @ self.diff.Adiff.T
+            
+        (self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier,
+         self.diff.covtt, self.diff.covqq, self.diff.chisq) = \
+        getAverage(self.q, self.diff.ds, self.diff.covii,
+                   self.diff.isOutlier, self.diff.delay_str, self.t_str, self.diff.toff_str,
                    fraction, chisqThresh,
                    q_break, chisqThresh_lowq, chisqThresh_highq,
-                   plotting, chisqHistMax, y_offset)
-        print('*** Processing done ***')
-
-
+                   plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset,
+                   dezinger=dezinger, dezingerThresh=dezingerThresh,
+                   estimateCov=estimateCov, useCovShrinkage=useCovShrinkage,
+                   covShrinkage=covShrinkage)
+        print('*** Done ***')
+        
+        
         
 # 5. Saving
     
@@ -707,14 +725,16 @@ class ScatData:
                         if not (subattr.startswith('_') or
                                 subattr.startswith('ai')):
                             data_to_record = obj.__getattribute__(subattr)
+#                            print(data_to_record)
                             if not ((type(data_to_record) == int) or
                                     (type(data_to_record) == float)):
                                 if ((type(data_to_record) == str) or
                                     (type(data_to_record[0]) == str)):
                                     data_to_record = '|'.join([i for i in data_to_record])
                             
-                            f.create_dataset(attr+'/'+subattr, data=data_to_record)
-                            print('\t'+subattr, 'saved')
+                            if not sparse.issparse(data_to_record):
+                                f.create_dataset(attr+'/'+subattr, data=data_to_record)
+                                print('\t'+subattr, 'saved')
                 
                 elif attr == 'logData':
                     self.logData.to_hdf(savePath, key='logData', mode='r+')
@@ -951,49 +971,116 @@ def getWeights(timeStamp, offsTBS, mapDiff):
 
 
 
-def getAverage(q, delay_str, x, t_str,
+def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
                fraction, chisqThresh,
                q_break, chisqThresh_lowq, chisqThresh_highq,
-               plotting, chisqHistMax, y_offset):
+               plotting=False, chisqHistMax=10, y_offset=None,
+               dezinger=True, dezingerThresh=5,
+               estimateCov=False, useCovShrinkage=True, covShrinkage=None):
     ''' Function for calculating averages and standard errors of data sets.
     For details see ScatData.getTotalAverages method docstring.
     '''
+    
+    x = x_orig.copy()
+    
     x_av = np.zeros((q.size, t_str.size))
-    x_err = np.zeros((q.size, t_str.size))
-    isOutlier = np.zeros(delay_str.size, dtype=bool)
-    if y_offset == 'auto':
-        y_offset = (np.max(np.percentile(x, 95, axis=1)) - 
-                    np.min(np.percentile(x,  5, axis=1)))*1.1
-    else:
-        assert type(y_offset)==float, 'y_offset should be either float or "auto"'
-        
-    if plotting:
-        plt.figure(figsize = (t_str.size*2,4))
-        plt.clf()
+    if q_break: x_chisq = np.zeros((2, t_str.size))
+    else: x_chisq = np.zeros((delay_str.size))
+    
+    # For propoper average estimation we will need Amean operator
+    # Amean is defined such that x_mean @ Amean = X
+    Amean = np.zeros((t_str.size, delay_str.size))
+    
+    print('Identifying outliers ... ', end=''); outlierStartTime = time.clock()
     
     for i, delay_point in enumerate(t_str):
-        delay_selection = delay_str==delay_point
+        delay_selection = (delay_str==delay_point) & ~isOutlier
         x_loc = x[:, delay_selection]
-        isOutlier_loc, chisq, chisq_lowq, chisq_highq = \
+
+        isOutlier_loc, chisq_loc, chisq_lowq_loc, chisq_highq_loc, isHotPixel_loc = \
                 identifyOutliers(q, x_loc, fraction, chisqThresh, 
-                                 q_break, chisqThresh_lowq, chisqThresh_highq)
+                                 q_break, chisqThresh_lowq, chisqThresh_highq,
+                                 dezingerThresh=dezingerThresh)
         isOutlier[delay_selection] = isOutlier_loc
-        x_av[:,i] = np.mean(x_loc[:,~isOutlier_loc], axis = 1)
-        x_err[:,i] = np.std(x_loc[:,~isOutlier_loc], axis = 1)/np.sqrt(np.sum(~isOutlier_loc))
         
-        if plotting:
-            subidx = i
-            plotOutliers(q, x_loc, isOutlier_loc, 
-                         chisq, chisqThresh,
-                         q_break, chisq_lowq, chisqThresh_lowq, chisq_highq, chisqThresh_highq,
-                         chisqHistMax, subidx, y_offset)
+        if q_break: x_chisq[:, delay_selection] = np.vstack((chisq_lowq_loc[None, :],
+                                                             chisq_highq_loc[None, :]))
+        else: x_chisq[delay_selection] = chisq_loc
+        
+        if dezinger:
+            x_loc_med = np.tile(np.median(x_loc, axis=1)[:, None], x_loc.shape[1])
+            x_loc[isHotPixel_loc] = x_loc_med[isHotPixel_loc]
+            x[:, delay_selection] = x_loc
+        
+        Amean[i, delay_selection & ~isOutlier] = 1
     
-    return x_av, x_err, isOutlier
+    print('done ( %3.f' %((time.clock() - outlierStartTime)*1000), 'ms )')
+    
+    print('Averaging ... ', end=''); averageStartTime = time.clock()
+    
+    if sparse.issparse(covii): covii = covii.toarray()
+    # an inversion of the covii matrix is expensive, so for computing of the
+    # weighed average we approximate it with the inverse of the diagonal:
+    covii_diag_inv = np.diag(1/np.diag(covii))
+        
+    H = np.linalg.pinv(Amean @ covii_diag_inv @ Amean.T) @ Amean @ covii_diag_inv
+    x_av = (H @ x.T).T
+    
+    print('done ( %3.f' %((time.clock() - averageStartTime)*1000), 'ms )')
+    
+    if estimateCov:
+        
+        print('Covariance estimation ... ', end=''); covarStartTime = time.clock()
+        
+        covtt = H @ covii @ H.T
+        
+        dx = (x - x_av @ Amean) @ np.sqrt(covii_diag_inv)
+        dx = dx[:, ~isOutlier & (delay_str != toff_str)]
+        
+        if useCovShrinkage:
+            if covShrinkage is None:
+                _, covShrinkage = cov_shrink_ss(dx.T.copy(order='C'))
+        else:
+            covShrinkage = 0
+        
+        dxdxt = dx @ dx.T
+        dxdxt_diag = np.diag(np.diag(dxdxt))
+        
+        covqq = (dxdxt * (1 - covShrinkage) + dxdxt_diag * covShrinkage ) / (dx.shape[1] - t_str.size + 1)
+        
+        x_err = np.sqrt( np.diag(covqq)[:, None] * np.diag(covtt)[None, :] )
+        
+        print('done ( %3.f' %((time.clock() - covarStartTime)*1000), 'ms )')
+    
+    else:
+        covtt, covqq, x_err = None, None, None
+        
+        
+    if plotting:
+        pass
+#        if y_offset is None:
+#            y_offset = (np.max(np.percentile(x, 95, axis=1)) - 
+#                        np.min(np.percentile(x,  5, axis=1)))*1.1
+#        else:
+#            assert type(y_offset)==float, 'y_offset should be either float or None'
+        
+#        plt.figure(figsize = (t_str.size*2,4))
+#        plt.clf()
+#    
+#        if plotting:
+#            subidx = i
+#            plotOutliers(q, x_loc, isOutlier_loc, 
+#                         chisq, chisqThresh,
+#                         q_break, chisq_lowq, chisqThresh_lowq, chisq_highq, chisqThresh_highq,
+#                         chisqHistMax, subidx, y_offset)
+    
+    return x_av, x_err, isOutlier, covtt, covqq, x_chisq
 
 
 
 def identifyOutliers(q_orig, y_orig, fraction, chisqThresh,
-                     q_break, chisqThresh_lowq, chisqThresh_highq):
+                     q_break, chisqThresh_lowq, chisqThresh_highq,
+                     dezingerThresh=5):
     ''' Function for identification of outliers in a given data set.
     
     The function calculates the average and the standard deviation using fraction
@@ -1008,6 +1095,8 @@ def identifyOutliers(q_orig, y_orig, fraction, chisqThresh,
         chisq_highq_k = sum_(q>=q_break) ((y_k-y_av)/(y_std))**2
     To find outliers the function evaluates whether any of chisq_lowq_k or
     chisq_highq_k are higher than chisqThresh_lowq or chisqThresh_highq, respectively.
+    
+    The function also provides estimation of hot pixels
     
     You will need:
         q_orig - q values of the data
@@ -1044,7 +1133,10 @@ def identifyOutliers(q_orig, y_orig, fraction, chisqThresh,
         isOutlier = (chisq_lowq>=chisqThresh_lowq) | (chisq_highq>=chisqThresh_highq)
         chisq = None
         
-    return isOutlier, chisq, chisq_lowq, chisq_highq
+    isHotPixel = np.abs(y-ySel_av[:, None]) > dezingerThresh*ySel_std[:, None]
+    
+        
+    return isOutlier, chisq, chisq_lowq, chisq_highq, isHotPixel
 
 
 
