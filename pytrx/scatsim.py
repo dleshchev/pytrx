@@ -271,9 +271,21 @@ class Molecule:
             
     def calcDens(self):
         self.gr.calcDens()
-        self.dens = self.gr.dens    
+        self.dens = self.gr.dens
+        
     
+    def Debye(self, q):
+        hasQ = hasattr(self, 'q')
+        isSameQ = False
+        if hasQ: isSameQ = np.all(self.q == q)
+        if (not hasQ) or (not isSameQ):
+            self.q = q
+            self.f = formFactor(self.q, self.Z)
+        
+        self.sq = Debye(q, self, f=self.f)
     
+
+
 class GR:
     def __init__(self, Z, rmin=0, rmax=25, dr=0.01):
         self.Z = np.unique(Z)
@@ -497,7 +509,11 @@ def fromXYZ(filename, n_header=0):
         for line in f.readlines():
             values = line.split()
             if (line[0] != '#') and (len(values)==4):
-                Z.append(values[0])
+                try: 
+                    z = z_num2str(int(values[0]))
+                except ValueError:
+                    z = values[0]
+                Z.append(z)
                 xyz.append([float(i) for i in values[1:]])
     xyz = np.array(xyz)
     Z = np.array(Z)
