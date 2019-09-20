@@ -274,18 +274,6 @@ class Molecule:
         self.dens = self.gr.dens
         
     
-    def Debye(self, q):
-        hasQ = hasattr(self, 'q')
-        isSameQ = False
-        if hasQ: isSameQ = np.all(self.q == q)
-        if (not hasQ) or (not isSameQ):
-            self.q = q
-            self.f = formFactor(self.q, self.Z)
-        
-        self.sq = Debye(q, self, f=self.f)
-    
-
-
 class GR:
     def __init__(self, Z, rmin=0, rmax=25, dr=0.01):
         self.Z = np.unique(Z)
@@ -316,6 +304,7 @@ class GR:
             z1 = z_str2num(el1)
             z2 = z_str2num(el2)
             self.dens += z1*z2*self.gr[frozenset(pair)]
+
 
 
 class Ensemble:
@@ -430,18 +419,26 @@ def Debye(q, mol, f=None):
         f = formFactor(q, mol.Z)
     Scoh = np.zeros(q.shape)
     mol.calcDistMat()
-    for el1 in f.keys():
-        idx1 = el1 == mol.Z
-        
-        for el2 in f.keys():
-            idx2 = el2 == mol.Z
-            r12 = mol.dist_mat[np.ix_(idx1, idx2)].ravel()
-            qr12 = q[:, None]*r12[None, :]
-            qr12[qr12<1e-6] = 1e-6 # to deal with r an q == 0
-            Scoh += f[el1]*f[el2]*np.sum(np.sin(qr12)/qr12, axis=1)
-            
+#    for el1 in f.keys():
+#        idx1 = el1 == mol.Z
+#        
+#        for el2 in f.keys():
+#            idx2 = el2 == mol.Z
+#            r12 = mol.dist_mat[np.ix_(idx1, idx2)].ravel()
+#            qr12 = q[:, None]*r12[None, :]
+#            qr12[qr12<1e-6] = 1e-6 # to deal with r an q == 0
+#            Scoh += f[el1]*f[el2]*np.sum(np.sin(qr12)/qr12, axis=1)
+    natoms = mol.Z.size
+    for idx1 in range(natoms):
+        for idx2 in range(idx1+1, natoms):
+            r12 = mol.dist_mat[idx1, idx2]
+            qr12 = q*r12
+            Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12)/qr12
+        Scoh += f[mol.Z[idx1]]**2
+    
     return Scoh
         
+
 
 def DebyeFromGR(q, gr, f=None):
     if f is None:
@@ -481,12 +478,12 @@ def Compton(z, q):
     data_lowz['Z'] = data_lowz['Z'].apply(lambda x: z_num2str(x))
     data_highz['Z'] = data_highz['Z'].apply(lambda x: z_num2str(x))
     
-    Scoh = Solute.getAtomicFormFactor(None, z, q)[z]
+    Scoh = formFactor(q, z)[z]**2
     z_num = z_str2num(z)
     
     if z in data_lowz['Z'].values:
         M, K, L = data_lowz[data_lowz['Z']==z].values[0,1:4]
-        S_inc = (z_num - Scoh)/z_num * (1-M*(np.exp(-K*q/(4*pi))-np.exp(-L*q/(4*pi))))
+        S_inc = (z_num - Scoh/z_num) * (1-M*(np.exp(-K*q/(4*pi))-np.exp(-L*q/(4*pi))))
 #        S(idx_un(i),:) = (Z_un(i)-Scoh(idx_un(i),:)/Z_un(i)).*...
 #                         (1-M*(exp(-K*Q/(4*pi))-exp(-L*Q/(4*pi))));
     elif z in data_highz['Z'].values:
@@ -524,6 +521,34 @@ def FiletoZXYZ(filepath):
     ZXYZ = pd.read_csv(filepath, names=['Z', 'x', 'y', 'z'], sep='\s+')
     return ZXYZ
 
+
+def totalScattering(q, mol):
+    s_debye = Debye(q, mol)
+    
+    s_inc = np.zeros(q.shape)
+    for z in mol.Z:
+        s_inc += Compton(z, q)
+    
+    return s_debye + s_inc
+
+
+
+def Solvent(name_str):
+    if name_str == 'acetonitrile':
+       Z = np.array(['C', 'C', 'H', 'H', 'H', 'N'])
+       xyz = np.array([[  0.000000,    0.000000,    0.006313],
+                       [  0.000000,    0.000000,    1.462539],
+                       [  1.024583,    0.000000,   -0.370908],
+                       [ -0.512291,   -0.887315,   -0.370908],
+                       [ -0.512291,    0.887315,   -0.370908],
+                       [  0.000000,    0.000000,    2.615205]])
+    else:
+        return None
+    return Molecule(Z, xyz)
+        
+        
+
+
 def z_num2str(z):
     return ElementString()[z-1]
 
@@ -538,6 +563,9 @@ def ElementString():
     ElementString = 'H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og'
     return ElementString.split()
     
+
+
+
 
 #def convolutedExpDecay(t, tau, tzero, fwhm):
 #    t = t - tzero
