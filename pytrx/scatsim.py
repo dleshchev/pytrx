@@ -546,19 +546,26 @@ def Debye(q, mol, f=None, atomOnly=False):
         
 
 
-def DebyeFromGR(q, gr, f=None):
+def DebyeFromGR(q, gr, f=None, rmax=None, cage=False):
     if f is None:
         f = formFactor(q, gr.Z)
+    if rmax is None: rmax = gr.r.max()
+    
     Scoh = np.zeros(q.shape)
-    qr = q[:, None]*gr.r[None, :]
+    rsel = gr.r<rmax
+    qr = q[:, None]*gr.r[None, rsel]
     qr[qr<1e-6] = 1e-6
     Asin = np.sin(qr)/qr
     
     for pair in gr.el_pairs:
         el1, el2 = pair
-        pair_scat = f[el1] * f[el2] * (Asin @ gr[pair])
+#        print(Asin.shape, gr[pair].shape)
+        pair_scat = f[el1] * f[el2] * (Asin @ gr[pair][rsel])
         if el1==el2:
-            Scoh += pair_scat
+            if cage:
+                Scoh += 2*pair_scat
+            else:
+                Scoh += pair_scat
         else:
             Scoh += 2*pair_scat
         
@@ -729,9 +736,11 @@ if __name__ == '__main__':
 #                    [6.67, 0.0, 0.0]])
 
 #    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.01)    
-    fname1 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-LS-opt-PBE-TZVP-COSMO.xyz'
-    fname2 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-HS-opt-PBE-TZVP-COSMO.xyz'
+#    fname1 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-LS-opt-PBE-TZVP-COSMO.xyz'
+#    fname2 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-HS-opt-PBE-TZVP-COSMO.xyz'
     
+    fname1 = r"D:\lcls_dec2018\UserScripts\structures\pt2g4\pt2g24_singlet_b3lyp.xyz"
+    fname2 = r"D:\lcls_dec2018\UserScripts\structures\pt2g4\pt2g24_triplet_b3lyp.xyz"
 
     mol1 = fromXYZ(fname1)
     mol2 = fromXYZ(fname2)
