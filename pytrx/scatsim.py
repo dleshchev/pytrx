@@ -324,7 +324,7 @@ class Ensemble:
                                         self.xyz[subset, :, None, :])**2, axis=3))
         
         
-    def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset='all'):
+    def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset=None):
         self.calcDistMat(subset=subset)
         n_subset = self.dist_mat.shape[0]
         gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
@@ -367,10 +367,115 @@ class Ensemble:
     
         
 
+class RMC_Engine:
+    def __init__(self, q, ds, sigma, dsdt, mol_gs, mol_es, n_mol_gs, n_mol_es, atom_rms, qmin=None, qmax=None):
+        
+        if qmin is None: qmin = q.min()
+        if qmax is None: qmax = q.max()
+        qsel = (q>=qmin) & (q<=qmax)
+        
+        self.q = q[qsel]
+        self.ds = ds[qsel]
+        self.sigma = sigma[np.ix_(qsel, qsel)]
+        self.sigma_inv = np.linalg.pinv(self.sigma)
+        self.Lq = np.linalg.cholesky(self.sigma_inv)
+        self.dsdt = dsdt[qsel]
+        self.mol_gs = mol_gs
+        self.mol_es = mol_es
+        self.n_mol_gs = n_mol_gs
+        self.n_mol_es = n_mol_es
+        self.n_at_gs = self.mol_gs.Z.size
+        self.n_at_es = self.mol_es.Z.size
+        self.es_frac = n_mol_es/(n_mol_gs + n_mol_es)
+        
+        self.ens_gs = Ensemble(mol_gs, n_mol_gs)
+        self.ens_es = Ensemble(mol_es, n_mol_es)
+        
+        print('Ensembles initialized')
+        self.ds_solu = self.calc_ds_solu()
+        self.ds_fit, self.chisq = self._fit(self.ds_solu)
+        
+        print('Starting chisq: ', self.chisq)
 
-
-
-
+    
+    def _fit(self, ds_solu):
+        basis_set = np.hstack((ds_solu[:, None],
+                               self.dsdt[:, None]))
+        
+        coef, chisq, _, _ = np.linalg.lstsq(self.Lq.T @ basis_set,
+                                            self.Lq.T @ self.ds[:, None],
+                                            rcond=-1)
+        ds_fit = basis_set @ coef
+        return ds_fit, chisq
+        
+    
+    @property
+    def gr_rmax(self):
+        self.mol_gs.calcDistMat()
+        self.mol_es.calcDistMat()
+        
+        all_dist = np.hstack((self.mol_gs.dist_mat.ravel().max(), self.mol_es.dist_mat.ravel().max()))
+        return all_dist.max()+20
+        
+        
+    def calc_ds_solu(self, subset_gs=None, subset_es=None):
+        if subset_gs is None: n_mol_gs = self.n_mol_gs
+        else: n_mol_gs = subset_gs.size
+        if subset_es is None: n_mol_es = self.n_mol_es
+        else: n_mol_es = subset_es.size
+        
+        rmax = self.gr_rmax
+        gr_gs = self.ens_gs._computeGR(rmax=rmax, subset=subset_gs)
+        gr_es = self.ens_es._computeGR(rmax=rmax, subset=subset_es)
+        return (DebyeFromGR(self.q, gr_es)/n_mol_es - 
+                DebyeFromGR(self.q, gr_gs)/n_mol_gs)
+        
+    
+    def rmc_run(self, n_steps):
+        pass
+        
+            
+        
+        
+    def rmc_step(self):
+        x = np.random.rand(1)
+        rmax = self.gr_rmax
+        if x <= self.es_frac:
+            idx_mol = np.random.randint(self.n_mol_es)
+            idx_atom = np.random.randint(self.n_at_es)
+            
+            gr_before = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
+            xyz_mol_atom_before = self.ens_es.XYZ[idx_mol, idx_atom, :]
+            
+            self.ens_es.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
+            gr_after = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
+            xyz_mol_atom_after = self.ens_es.XYZ[idx_mol, idx_atom, :]
+            
+            delta_ds_solu = (DebyeFromGR(self.q, xyz_mol_atom_after) -
+                             DebyeFromGR(self.q, xyz_mol_atom_before))/self.n_mol_es
+                             
+            ds_after, chisq_after = self._fit(self.ds_solu + delta_ds_solu)
+        
+        
+        else:
+            idx_mol = np.random.randint(self.n_mol_gs)
+            idx_atom = np.random.randint(self.n_at_gs)
+            
+            gr_before = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
+            xyz_mol_atom_before = self.ens_gs.XYZ[idx_mol, idx_atom, :]
+            
+            self.ens_gs.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
+            gr_after = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
+            xyz_mol_atom_after = self.ens_gs.XYZ[idx_mol, idx_atom, :]
+            
+            delta_ds_solu = (DebyeFromGR(self.q, gr_after) -
+                             DebyeFromGR(self.q, gr_before))/self.n_mol_gs
+                             
+            ds_after, chisq_after = self._fit(self.ds_solu - delta_ds_solu)
+            
+            
+            
+        
 ### UTILS
 
 
@@ -414,7 +519,7 @@ def formFactor(q, Elements):
     return f
 
 
-def Debye(q, mol, f=None):
+def Debye(q, mol, f=None, atomOnly=False):
     if f is None:
         f = formFactor(q, mol.Z)
     Scoh = np.zeros(q.shape)
@@ -431,9 +536,10 @@ def Debye(q, mol, f=None):
     natoms = mol.Z.size
     for idx1 in range(natoms):
         for idx2 in range(idx1+1, natoms):
-            r12 = mol.dist_mat[idx1, idx2]
-            qr12 = q*r12
-            Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12)/qr12
+            if not atomOnly:
+                r12 = mol.dist_mat[idx1, idx2]
+                qr12 = q*r12
+                Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12)/qr12
         Scoh += f[mol.Z[idx1]]**2
     
     return Scoh
@@ -522,8 +628,8 @@ def FiletoZXYZ(filepath):
     return ZXYZ
 
 
-def totalScattering(q, mol):
-    s_debye = Debye(q, mol)
+def totalScattering(q, mol, atomOnly=False):
+    s_debye = Debye(q, mol, atomOnly=atomOnly)
     
     s_inc = np.zeros(q.shape)
     for z in mol.Z:
@@ -542,6 +648,26 @@ def Solvent(name_str):
                        [ -0.512291,   -0.887315,   -0.370908],
                        [ -0.512291,    0.887315,   -0.370908],
                        [  0.000000,    0.000000,    2.615205]])
+    elif name_str == 'cyclohexane':
+        Z = np.array(['C']*6 + ['H']*12)
+        xyz = np.array([[-0.7613, -0.7573,  0.9857],               
+                        [ 0.7614, -0.7575,  0.9855],               
+                        [-1.2697,  0.5686,  0.4362],               
+                        [ 1.2693, -0.5690, -0.4379],               
+                        [-0.7627,  0.7570, -0.9872],               
+                        [ 0.7603,  0.7568, -0.9883],               
+                        [-1.1313, -0.8928,  2.0267],               
+                        [-1.1314, -1.5893,  0.3455],               
+                        [ 1.1315, -1.7280,  1.3860],               
+                        [ 1.1315,  0.0762,  1.6235],               
+                        [-2.3828,  0.5666,  0.4355],               
+                        [-0.8972,  1.4009,  1.0747],               
+                        [ 2.3828, -0.5672, -0.4356],               
+                        [ 0.8980, -1.4027, -1.0759],               
+                        [-1.1338,  1.7273, -1.3870],               
+                        [-1.1329, -0.0768, -1.6251],               
+                        [ 1.1290,  0.8924, -2.0303],               
+                        [ 1.1300,  1.5904, -0.3493]])
     else:
         return None
     return Molecule(Z, xyz)
