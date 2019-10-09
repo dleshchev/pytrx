@@ -273,16 +273,27 @@ class Molecule:
         self.gr.calcDens()
         self.dens = self.gr.dens
         
-    
+   
+
 class GR:
-    def __init__(self, Z, rmin=0, rmax=25, dr=0.01):
-        self.Z = np.unique(Z)
+    def __init__(self, Z, rmin=0, rmax=25, dr=0.01, r=None, el_pairs=None):
         
-        self.r = np.arange(rmin, rmax+dr, dr)
-        self.r_bins = np.arange(rmin-0.5*dr, rmax+1.5*dr, dr)
+        self.Z = np.unique(Z)
+        if el_pairs is None:
+            self.el_pairs = [(z_i, z_j) for i, z_i in enumerate(self.Z) for z_j in self.Z[i:]]
+        else:
+            self.el_pairs = el_pairs
+        
+        if r is None:
+#            self.r = np.arange(rmin, rmax+dr, dr)
+            self.r = np.linspace(rmin, rmax, (rmax - rmin)/dr + 1)
+        else:
+            self.r = r
+            rmin, rmax, dr = r.min(), r.max(), r[1]-r[0]
+#        self.r_bins = np.arange(rmin-0.5*dr, rmax+1.5*dr, dr)
+        self.r_bins = np.linspace(rmin-0.5*dr, rmax+0.5*dr, (rmax - rmin)/dr + 2)
         
         self.gr = {}
-        self.el_pairs = [(z_i, z_j) for i, z_i in enumerate(self.Z) for z_j in self.Z[i:]]
         for pair in self.el_pairs:
             self.gr[frozenset(pair)] = np.zeros(self.r.size)
         
@@ -296,6 +307,20 @@ class GR:
         key = frozenset(key)
         return self.gr[key]
     
+    
+    def __add__(self, gr_other):
+        gr_out = GR(self.Z, r=self.r, el_pairs=self.el_pairs)
+        for pair in self.el_pairs:
+            gr_out[pair] = self[pair] + gr_other[pair]
+        return gr_out
+    
+    
+    def __sub__(self, gr_other):
+        gr_out = GR(self.Z, r=self.r, el_pairs=self.el_pairs)
+        for pair in self.el_pairs:
+            gr_out[pair] = self[pair] - gr_other[pair]
+        return gr_out
+        
     
     def calcDens(self):
         self.dens = np.zeros(self.r.shape)
