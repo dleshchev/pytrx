@@ -352,8 +352,12 @@ class Ensemble:
     def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset=None):
         self.calcDistMat(subset=subset)
         n_subset = self.dist_mat.shape[0]
-        gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
-        if not hasattr(self, 'r'): self.r = gr.r
+        
+        if not hasattr(self, 'r'):
+            gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
+            self.r = gr.r
+        else:
+            gr = GR(self.Z, r=self.r)
         
         for pair in gr.el_pairs:
             el1, el2 = pair
@@ -398,30 +402,38 @@ class diffEnsemble:
         self.n_mol_gs = n_mol_gs
         self.n_mol_es = n_mol_es
         
-        self.xyz = np.concatenate(np.tile(mol_gs.xyz, (n_mol_gs, 1, 1)),
-                                  np.tile(mol_es.xyz, (n_mol_es, 1, 1)), axis=0)
+        self.xyz = np.concatenate((np.tile(mol_gs.xyz, (n_mol_gs, 1, 1)),
+                                   np.tile(mol_es.xyz, (n_mol_es, 1, 1))), axis=0)
         
         
         
-    def calcDistMat(self, subset=None):
-        if subset is None: subset = np.arange(self.n_mol)
+    def calcDistMat(self, subset):
         self.dist_mat = np.sqrt(np.sum((self.xyz[subset, None, :, :] - 
                                         self.xyz[subset, :, None, :])**2, axis=3))
         
         
     def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset=None):
-        self.calcDistMat(subset=subset)
+        if subset is None: subset = np.arange(self.n_mol_gs + self.n_mol_es)
+        elif subset == 'gs': subset = np.arange(self.n_mol_gs)
+        elif subset == 'es': subset = np.arange(self.n_mol_es) + self.n_mol_gs
+        
+        self.calcDistMat(subset)
         n_subset = self.dist_mat.shape[0]
         gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
         if not hasattr(self, 'r'): self.r = gr.r
         
         for pair in gr.el_pairs:
             el1, el2 = pair
-            idx1, idx2 = (el1==self.Z, el2==self.Z)
+            idx1, idx2 = (el1==self.Z[subset], el2==self.Z[subset])
             idx_grid = np.ix_(np.ones(n_subset, dtype='bool'), idx1, idx2)
             gr[pair] += np.histogram(self.dist_mat[idx_grid].ravel(), gr.r_bins)[0]
         
         return gr
+    
+    def calcGR(self, rmin=0, rmax=25, dr=0.01):
+        self.gr_gs = self._computeGR(rmin=rmin, rmax=rmax, dr=dr, subset='gs')
+        self.gr_es = self._computeGR(rmin=rmin, rmax=rmax, dr=dr, subset='es')
+        
 
 
 class RMC_Engine:
