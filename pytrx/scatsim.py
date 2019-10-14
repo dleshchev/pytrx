@@ -350,9 +350,6 @@ class Ensemble:
         m_mol = idx_mol.size
         m_atom = idx_atom.size
         dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
-#        idx = np.ix_()
-#        print(self.xyz.shape, idx_mol.shape, idx_atom.shape)
-#        print(self.xyz[idx_mol[], idx_atom, :].shape)
         self.xyz[idx_mol[:, None], idx_atom, :] += dxyz
     
     
@@ -366,6 +363,41 @@ class Ensemble:
 #        self.dens = self.gr.dens    
     
         
+class diffEnsemble:
+    def __init__(self, mol_gs, mol_es, n_mol_gs, n_mol_es):
+        self.Z = np.hstack((mol_gs.Z, mol_es.Z))
+        
+        self.n_atom_gs = mol_gs.xyz.shape[0]
+        self.n_atom_es = mol_es.xyz.shape[0]
+        
+        self.n_mol_gs = n_mol_gs
+        self.n_mol_es = n_mol_es
+        
+        self.xyz = np.concatenate(np.tile(mol_gs.xyz, (n_mol_gs, 1, 1)),
+                                  np.tile(mol_es.xyz, (n_mol_es, 1, 1)), axis=0)
+        
+        
+        
+    def calcDistMat(self, subset=None):
+        if subset is None: subset = np.arange(self.n_mol)
+        self.dist_mat = np.sqrt(np.sum((self.xyz[subset, None, :, :] - 
+                                        self.xyz[subset, :, None, :])**2, axis=3))
+        
+        
+    def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset=None):
+        self.calcDistMat(subset=subset)
+        n_subset = self.dist_mat.shape[0]
+        gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
+        if not hasattr(self, 'r'): self.r = gr.r
+        
+        for pair in gr.el_pairs:
+            el1, el2 = pair
+            idx1, idx2 = (el1==self.Z, el2==self.Z)
+            idx_grid = np.ix_(np.ones(n_subset, dtype='bool'), idx1, idx2)
+            gr[pair] += np.histogram(self.dist_mat[idx_grid].ravel(), gr.r_bins)[0]
+        
+        return gr
+
 
 class RMC_Engine:
     def __init__(self, q, ds, sigma, dsdt, mol_gs, mol_es, n_mol_gs, n_mol_es, atom_rms, qmin=None, qmax=None):
