@@ -394,7 +394,8 @@ class Ensemble:
         
 class diffEnsemble:
     def __init__(self, mol_gs, mol_es, n_mol_gs, n_mol_es):
-        self.Z = np.hstack((mol_gs.Z, mol_es.Z))
+#        self.Z = np.hstack((mol_gs.Z, mol_es.Z))
+        self.Z = mol_gs.Z.copy()
         
         self.n_atom_gs = mol_gs.xyz.shape[0]
         self.n_atom_es = mol_es.xyz.shape[0]
@@ -412,6 +413,7 @@ class diffEnsemble:
                                         self.xyz[subset, :, None, :])**2, axis=3))
         
         
+        
     def _computeGR(self, rmin=0, rmax=25, dr=0.01, subset=None):
         if subset is None: subset = np.arange(self.n_mol_gs + self.n_mol_es)
         elif subset == 'gs': subset = np.arange(self.n_mol_gs)
@@ -419,21 +421,59 @@ class diffEnsemble:
         
         self.calcDistMat(subset)
         n_subset = self.dist_mat.shape[0]
+        subset_mask = np.ones(n_subset, dtype='bool')
+        subset_mask_gs = subset_mask[subset<self.n_mol_gs]
+        subset_mask_es = subset_mask[subset>=self.n_mol_gs]
+        
         gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
         if not hasattr(self, 'r'): self.r = gr.r
         
         for pair in gr.el_pairs:
             el1, el2 = pair
-            idx1, idx2 = (el1==self.Z[subset], el2==self.Z[subset])
-            idx_grid = np.ix_(np.ones(n_subset, dtype='bool'), idx1, idx2)
-            gr[pair] += np.histogram(self.dist_mat[idx_grid].ravel(), gr.r_bins)[0]
+            idx1, idx2 = (el1==self.Z, el2==self.Z)
+            idx_grid_gs = np.ix_(subset_mask_gs, idx1, idx2)
+            idx_grid_es = np.ix_(subset_mask_es, idx1, idx2)
+            gr[pair] -= np.histogram(self.dist_mat[idx_grid_gs].ravel(), gr.r_bins)[0]
+            gr[pair] += np.histogram(self.dist_mat[idx_grid_es].ravel(), gr.r_bins)[0]
         
         return gr
+    
+
     
     def calcGR(self, rmin=0, rmax=25, dr=0.01):
         self.gr_gs = self._computeGR(rmin=rmin, rmax=rmax, dr=dr, subset='gs')
         self.gr_es = self._computeGR(rmin=rmin, rmax=rmax, dr=dr, subset='es')
+        self.diff_gr = self.gr_es - self.gr_gs
         
+        
+        
+    def generate_perturbation(self, amplitude, idx_mol=None, idx_atom=None):
+        if idx_mol is None: idx_mol = np.arange(self.n_mol_gs + self.n_mol_es)
+        if idx_atom is None: idx_atom = np.arange(self.n_atom_gs) # is based on the assumption that # of atoms in ES and GS is the same
+        
+        m_mol = idx_mol.size
+        m_atom = idx_atom.size
+        dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
+        
+        return dxyz
+    
+    
+    
+    def perturb_all(self, amplitude):
+        self.xyz += self.generate_perturbation(amplitude)
+        
+
+#class Perturbation:
+#    def __init__(self, pert_type, amplitude, idx_mol, idx_atom):
+#        if pert_type is 'normal':
+#            
+#            self.dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
+#            self.idx_mol = idx_mol
+#            self.idx_atom = idx_atom
+#        
+#        elif pert_type is 'vibration':
+#            pass
+
 
 
 class RMC_Engine:
@@ -457,8 +497,7 @@ class RMC_Engine:
         self.n_at_es = self.mol_es.Z.size
         self.es_frac = n_mol_es/(n_mol_gs + n_mol_es)
         
-        self.ens_gs = Ensemble(mol_gs, n_mol_gs)
-        self.ens_es = Ensemble(mol_es, n_mol_es)
+        self.diff_ens = diffEnsemble(mol_gs, mol_es, n_mol_gs, n_mol_es)
         
         print('Ensembles initialized')
         self.ds_solu = self.calc_ds_solu()
@@ -487,15 +526,12 @@ class RMC_Engine:
         return all_dist.max()+20
         
         
-    def calc_ds_solu(self, subset_gs=None, subset_es=None):
-        if subset_gs is None: n_mol_gs = self.n_mol_gs
-        else: n_mol_gs = subset_gs.size
-        if subset_es is None: n_mol_es = self.n_mol_es
-        else: n_mol_es = subset_es.size
-        
+    def calc_ds_solu(self, subset=None):
         rmax = self.gr_rmax
-        gr_gs = self.ens_gs._computeGR(rmax=rmax, subset=subset_gs)
-        gr_es = self.ens_es._computeGR(rmax=rmax, subset=subset_es)
+        if subset is None:
+            gr_gs = self.diff_ens._computeGR(rmax=rmax, subset='gs')
+            gr_es = self.diff_ens._computeGR(rmax=rmax, subset='es')
+            
         return (DebyeFromGR(self.q, gr_es)/n_mol_es - 
                 DebyeFromGR(self.q, gr_gs)/n_mol_gs)
         
