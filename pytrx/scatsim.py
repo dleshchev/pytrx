@@ -320,7 +320,14 @@ class GR:
         for pair in self.el_pairs:
             gr_out[pair] = self[pair] - gr_other[pair]
         return gr_out
-        
+    
+
+    def __mul__(self, factor):
+        gr_out = GR(self.Z, r=self.r, el_pairs=self.el_pairs)
+        for pair in self.el_pairs:
+            gr_out[pair] = self[pair] * factor
+        return gr_out
+    
     
     def calcDens(self):
         self.dens = np.zeros(self.r.shape)
