@@ -454,32 +454,43 @@ class diffEnsemble:
         
         
         
-    def generate_perturbation(self, amplitude, idx_mol=None, idx_atom=None):
-        if idx_mol is None: idx_mol = np.arange(self.n_mol_gs + self.n_mol_es)
-        if idx_atom is None: idx_atom = np.arange(self.n_atom_gs) # is based on the assumption that # of atoms in ES and GS is the same
-        
-        m_mol = idx_mol.size
-        m_atom = idx_atom.size
-        dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
-        
-        return dxyz
+#    def generate_perturbation(self, amplitude, idx_mol=None, idx_atom=None):
+#        if idx_mol is None: idx_mol = np.arange(self.n_mol_gs + self.n_mol_es)
+#        if idx_atom is None: idx_atom = np.arange(self.n_atom_gs) # is based on the assumption that # of atoms in ES and GS is the same
+#        
+#        m_mol = idx_mol.size
+#        m_atom = idx_atom.size
+#        dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
+#        
+#        return dxyz
     
     
     
     def perturb_all(self, amplitude):
-        self.xyz += self.generate_perturbation(amplitude)
+#        self.xyz += self.generate_perturbation(amplitude)
+        p = Perturbation('normal', amplitude,
+                         n_mol = (self.n_mol_gs + self.n_mol_es),
+                         n_atom = self.n_atom_gs)
+        self.xyz += p.generate_displacement()
+        
         
 
-#class Perturbation:
-#    def __init__(self, pert_type, amplitude, idx_mol, idx_atom):
-#        if pert_type is 'normal':
-#            
-#            self.dxyz = np.random.randn(m_mol, m_atom, 3)*amplitude/np.sqrt(3)
-#            self.idx_mol = idx_mol
-#            self.idx_atom = idx_atom
-#        
-#        elif pert_type is 'vibration':
-#            pass
+
+
+class Perturbation:
+    def __init__(self, pert_type, amp, n_mol=1, n_atom=1):
+        if pert_type == 'normal':
+            self.amp = amp
+            self.dxyz = np.ones((n_mol, n_atom, 3)) * self.amp / np.sqrt(3)
+            self.shape = self.dxyz.shape
+        
+        elif pert_type == 'vibration':
+            pass
+    
+    
+    def generate_displacement(self):
+        return (np.random.randn(*self.shape) * self.dxyz)
+
 
 
 
@@ -543,13 +554,13 @@ class RMC_Engine:
                 DebyeFromGR(self.q, gr_gs)/n_mol_gs)
         
     
-    def rmc_run(self, n_steps):
+    def run(self, n_steps):
         pass
         
             
         
         
-    def rmc_step(self):
+    def step(self):
         x = np.random.rand(1)
         rmax = self.gr_rmax
         if x <= self.es_frac:
