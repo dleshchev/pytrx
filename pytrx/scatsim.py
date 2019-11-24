@@ -429,6 +429,8 @@ class diffEnsemble:
         mask_gs, mask_es = self._divideSubset(subset)
         self.calcDistMat(subset)
         
+        if hasattr(self, 'r'):
+            rmin, rmax, dr = self.r.min(), self.r.max(), (self.r[1]-self.r[0])
         gr = GR(self.Z, rmin=rmin, rmax=rmax, dr=dr)
         if not hasattr(self, 'r'): self.r = gr.r
         
@@ -508,7 +510,10 @@ class Perturbation:
 
 
 class RMC_Engine:
-    def __init__(self, q, ds, sigma, dsdt, diff_ens, perturbation, reg, qmin=None, qmax=None):
+    def __init__(self, q, ds, sigma, dsdt,
+                 diff_ens, perturbation, reg,
+                 qmin=None, qmax=None,
+                 dr=0.01):
         
         if qmin is None: qmin = q.min()
         if qmax is None: qmax = q.max()
@@ -527,9 +532,9 @@ class RMC_Engine:
         self.reg = reg
         
         self.rmax = self._rmax()
+        self.dr = dr
         
         self.ds_solu = self.calc_ds_solu()
-        
         
         self.ds_fit, self.chisq_init = self._fit(self.ds_solu)
         self.penalty_init = self.diff_ens.var() / self.reg**2
@@ -550,7 +555,7 @@ class RMC_Engine:
         
         
     def calc_ds_solu(self, subset=None):
-        gr = self.diff_ens._computeGR(rmax=self.rmax, subset=subset)
+        gr = self.diff_ens._computeGR(rmax=self.rmax, dr=self.dr, subset=subset)
         return DebyeFromGR(self.q, gr)
     
     
@@ -571,44 +576,69 @@ class RMC_Engine:
             
         
         
-    def step(self):
+    def step(self, chisq, penalty, obj_fun):
+        idx_mol = np.random.randint(self.diff_ens.n_mol_gs + 
+                                    self.diff_ens.n_mol_es,
+                                    size=(self.perturbation.shape[0],))
+        idx_atom = np.random.randint(self.diff_ens.n_atom,
+                                     size=(self.perturbation.shape[1],))
         
+        dxyz = self.perturbation.generate_displacement().squeeze()
         
+        ds_specific_before = self.calc_ds_solu(subset=idx_mol)
+        p_specific_before = self.diff_ens.var(subset=idx_mol)
         
-        x = np.random.rand(1)
-        rmax = self.gr_rmax
-        if x <= self.es_frac:
-            idx_mol = np.random.randint(self.n_mol_es)
-            idx_atom = np.random.randint(self.n_at_es)
-            
-            gr_before = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
-            xyz_mol_atom_before = self.ens_es.XYZ[idx_mol, idx_atom, :]
-            
-            self.ens_es.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
-            gr_after = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
-            xyz_mol_atom_after = self.ens_es.XYZ[idx_mol, idx_atom, :]
-            
-            delta_ds_solu = (DebyeFromGR(self.q, xyz_mol_atom_after) -
-                             DebyeFromGR(self.q, xyz_mol_atom_before))/self.n_mol_es
-                             
-            ds_after, chisq_after = self._fit(self.ds_solu + delta_ds_solu)
+        self.diff_ens.xyz[idx_mol, idx_atom, :] += dxyz
         
+        ds_specific_after = self.calc_ds_solu(subset=idx_mol)
+        p_specific_after = self.diff_ens.var(subset=idx_mol)
         
-        else:
-            idx_mol = np.random.randint(self.n_mol_gs)
-            idx_atom = np.random.randint(self.n_at_gs)
-            
-            gr_before = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
-            xyz_mol_atom_before = self.ens_gs.XYZ[idx_mol, idx_atom, :]
-            
-            self.ens_gs.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
-            gr_after = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
-            xyz_mol_atom_after = self.ens_gs.XYZ[idx_mol, idx_atom, :]
-            
-            delta_ds_solu = (DebyeFromGR(self.q, gr_after) -
-                             DebyeFromGR(self.q, gr_before))/self.n_mol_gs
-                             
-            ds_after, chisq_after = self._fit(self.ds_solu - delta_ds_solu)
+        dds_specific = ds_specific_after - ds_specific_before
+        
+        ds_fit_upd, chisq_upd = self._fit(self.ds_solu + dds_specific)
+        dchisq = chisq_upd - chisq
+        dpenalty = p_specific_after - p_specific_before
+        
+        dobj_fun = dchisq + dpenalty
+        
+#        print(dobj_fun)
+        
+        self.diff_ens.xyz[idx_mol, idx_atom, :] -= dxyz
+#        
+#        x = np.random.rand(1)
+#        rmax = self.gr_rmax
+#        if x <= self.es_frac:
+#            idx_mol = np.random.randint(self.n_mol_es)
+#            idx_atom = np.random.randint(self.n_at_es)
+#            
+#            gr_before = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
+#            xyz_mol_atom_before = self.ens_es.XYZ[idx_mol, idx_atom, :]
+#            
+#            self.ens_es.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
+#            gr_after = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
+#            xyz_mol_atom_after = self.ens_es.XYZ[idx_mol, idx_atom, :]
+#            
+#            delta_ds_solu = (DebyeFromGR(self.q, xyz_mol_atom_after) -
+#                             DebyeFromGR(self.q, xyz_mol_atom_before))/self.n_mol_es
+#                             
+#            ds_after, chisq_after = self._fit(self.ds_solu + delta_ds_solu)
+#        
+#        
+#        else:
+#            idx_mol = np.random.randint(self.n_mol_gs)
+#            idx_atom = np.random.randint(self.n_at_gs)
+#            
+#            gr_before = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
+#            xyz_mol_atom_before = self.ens_gs.XYZ[idx_mol, idx_atom, :]
+#            
+#            self.ens_gs.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
+#            gr_after = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
+#            xyz_mol_atom_after = self.ens_gs.XYZ[idx_mol, idx_atom, :]
+#            
+#            delta_ds_solu = (DebyeFromGR(self.q, gr_after) -
+#                             DebyeFromGR(self.q, gr_before))/self.n_mol_gs
+#                             
+#            ds_after, chisq_after = self._fit(self.ds_solu - delta_ds_solu)
             
             
             
