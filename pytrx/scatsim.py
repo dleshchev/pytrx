@@ -571,8 +571,16 @@ class RMC_Engine:
         
     
     def run(self, n_steps):
-        pass
+        self.chisq = np.hstack((self.chisq_init, np.zeros(n_steps)))
+        self.penalty = np.hstack((self.penalty_init, np.zeros(n_steps)))
+        self.obj_fun = np.hstack((self.obj_fun_init, np.zeros(n_steps)))
         
+        for i in range(1, n_steps+1):
+            if i % 100 == 0: print('Progress: ', i, '/', n_steps )
+            self.ds_solu, self.ds_fit, self.chisq[i], self.penalty[i], self.obj_fun[i] = self.step(self.chisq[i-1],
+                                                                           self.penalty[i-1],
+                                                                           self.obj_fun[i-1])
+        self.diff_ens.calcGR()
             
         
         
@@ -585,62 +593,32 @@ class RMC_Engine:
         
         dxyz = self.perturbation.generate_displacement().squeeze()
         
-        ds_specific_before = self.calc_ds_solu(subset=idx_mol)
-        p_specific_before = self.diff_ens.var(subset=idx_mol)
+        ds_subset = self.calc_ds_solu(subset=idx_mol)
+        penalty_subset = self.diff_ens.var(subset=idx_mol) / self.reg**2
         
         self.diff_ens.xyz[idx_mol, idx_atom, :] += dxyz
         
-        ds_specific_after = self.calc_ds_solu(subset=idx_mol)
-        p_specific_after = self.diff_ens.var(subset=idx_mol)
+        ds_subset_upd = self.calc_ds_solu(subset=idx_mol)
+        penalty_subset_upd = self.diff_ens.var(subset=idx_mol) / self.reg**2
         
-        dds_specific = ds_specific_after - ds_specific_before
+        ds_solu_upd = self.ds_solu - ds_subset + ds_subset_upd
         
-        ds_fit_upd, chisq_upd = self._fit(self.ds_solu + dds_specific)
-        dchisq = chisq_upd - chisq
-        dpenalty = p_specific_after - p_specific_before
+        ds_fit_upd, chisq_upd = self._fit(ds_solu_upd)
+        penalty_upd = penalty - penalty_subset + penalty_subset_upd
+        obj_fun_upd = (chisq_upd + penalty_upd)
         
-        dobj_fun = dchisq + dpenalty
+        dobj_fun = obj_fun_upd - obj_fun
         
-#        print(dobj_fun)
+        prob = np.exp(-dobj_fun/2*1e3)
+        x = np.random.rand()
         
-        self.diff_ens.xyz[idx_mol, idx_atom, :] -= dxyz
-#        
-#        x = np.random.rand(1)
-#        rmax = self.gr_rmax
-#        if x <= self.es_frac:
-#            idx_mol = np.random.randint(self.n_mol_es)
-#            idx_atom = np.random.randint(self.n_at_es)
-#            
-#            gr_before = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
-#            xyz_mol_atom_before = self.ens_es.XYZ[idx_mol, idx_atom, :]
-#            
-#            self.ens_es.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
-#            gr_after = self.ens_es._computeGR(rmax=rmax, subset=idx_mol)
-#            xyz_mol_atom_after = self.ens_es.XYZ[idx_mol, idx_atom, :]
-#            
-#            delta_ds_solu = (DebyeFromGR(self.q, xyz_mol_atom_after) -
-#                             DebyeFromGR(self.q, xyz_mol_atom_before))/self.n_mol_es
-#                             
-#            ds_after, chisq_after = self._fit(self.ds_solu + delta_ds_solu)
-#        
-#        
-#        else:
-#            idx_mol = np.random.randint(self.n_mol_gs)
-#            idx_atom = np.random.randint(self.n_at_gs)
-#            
-#            gr_before = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
-#            xyz_mol_atom_before = self.ens_gs.XYZ[idx_mol, idx_atom, :]
-#            
-#            self.ens_gs.perturb(idx_mol=idx_mol, idx_atom=idx_atom)
-#            gr_after = self.ens_gs._computeGR(rmax=rmax, subset=idx_mol)
-#            xyz_mol_atom_after = self.ens_gs.XYZ[idx_mol, idx_atom, :]
-#            
-#            delta_ds_solu = (DebyeFromGR(self.q, gr_after) -
-#                             DebyeFromGR(self.q, gr_before))/self.n_mol_gs
-#                             
-#            ds_after, chisq_after = self._fit(self.ds_solu - delta_ds_solu)
-            
-            
+        if x < prob: # accept
+            return ds_solu_upd, ds_fit_upd, chisq_upd, penalty_upd, obj_fun_upd
+        else: # reject
+            self.diff_ens.xyz[idx_mol, idx_atom, :] -= dxyz
+            return self.ds_solu, self.ds_fit, chisq, penalty, obj_fun
+        
+        
             
         
 ### UTILS
