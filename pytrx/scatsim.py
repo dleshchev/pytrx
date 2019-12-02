@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import time
 import pkg_resources
 
 class Solute:
@@ -536,12 +537,12 @@ class RMC_Engine:
         
         self.ds_solu = self.calc_ds_solu()
         
-        self.ds_fit, self.chisq_init = self._fit(self.ds_solu)
-        self.penalty_init = self.diff_ens.var() / self.reg**2
-        self.obj_fun_init = self.chisq_init + self.penalty_init
-        print('Starting chisq: ', self.chisq_init)
-        print('Starting penalty: ', self.penalty_init)
-        print('Starting obj_fun: ', self.obj_fun_init)
+        self.ds_fit, self.chisq = self._fit(self.ds_solu)
+        self.penalty = self.diff_ens.var() / self.reg**2
+        self.obj_fun = self.chisq + self.penalty
+        print('Starting chisq: ', self.chisq.ravel())
+        print('Starting penalty: ', self.penalty.ravel())
+        print('Starting obj_fun: ', self.obj_fun.ravel())
         
 
     
@@ -571,12 +572,18 @@ class RMC_Engine:
         
     
     def run(self, n_steps):
-        self.chisq = np.hstack((self.chisq_init, np.zeros(n_steps)))
-        self.penalty = np.hstack((self.penalty_init, np.zeros(n_steps)))
-        self.obj_fun = np.hstack((self.obj_fun_init, np.zeros(n_steps)))
+        n_cur = self.chisq.size
+        self.chisq = np.hstack((self.chisq, np.zeros(n_steps)))
+        self.penalty = np.hstack((self.penalty, np.zeros(n_steps)))
+        self.obj_fun = np.hstack((self.obj_fun, np.zeros(n_steps)))
         
-        for i in range(1, n_steps+1):
-            if i % 100 == 0: print('Progress: ', i, '/', n_steps )
+        startIntTime = time.clock()
+        for i in range(n_cur, n_steps+n_cur):
+            if i % 100 == 0:
+                interval = time.clock() - startIntTime
+                print('Progress: ', i, '/', n_cur+n_steps, '| Average interation time: %.0f' % (interval/100*1e3), 'ms')
+                startIntTime = time.clock()
+                
             self.ds_solu, self.ds_fit, self.chisq[i], self.penalty[i], self.obj_fun[i] = self.step(self.chisq[i-1],
                                                                            self.penalty[i-1],
                                                                            self.obj_fun[i-1])
