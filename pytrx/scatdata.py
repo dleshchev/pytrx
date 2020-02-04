@@ -11,7 +11,9 @@ understand input/output.
 @author: Denis Leshchev
 
 todo:
-- visualization of outlier rejection should be decluttered
+- visualization of outlier rejection should be commissioned
+- debug the outlier rejection with q_break
+- refactoring
 
 """
 from pathlib import Path
@@ -42,7 +44,10 @@ class ScatData:
         The workflow:
         
         0. Declare the data object (ex: A):
-        A = ScatData(<parameters*>)
+        A = ScatData()
+        
+        0a. Read log file A.readLog(<parameters>)
+        0b. Load log fine A.load(path)
             
         Provide the class with information on log data, input directory and output
         directory. The initiation of the object will assert the correctness of 
@@ -72,9 +77,9 @@ class ScatData:
         A.getDiffAverages(<parameters>)
         Provide the method with rejection thresholds.
         
-        5. Save data using A.saveData(<parameters>). *in progress*
+        5. Save data using A.save(path)
         
-        6. Load data using A.loadData(<parameters>). *in progress*
+        6. Load data using A.load(path)
         
         The methods invoked during the workflow update the
         attributes of the class instead of just providing returned values. This
@@ -85,49 +90,48 @@ class ScatData:
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
     
-    def __init__(self, initFlag='create_new', logFile=None, dataInDir=None, logFileStyle='biocars',
-                 ignoreFirst=False, nFiles=None, loadPath=None):
-        ''' To initialize the class, you will need either of the following:
+    def __init__(self):
+        pass
+        
+    
+    
+    def readLog(self, logFile, dataInDir,
+                logFileStyle='biocars', ignoreFirst=False, nFiles=None):
+        '''
+        To read the file:
             
-            (1) if initFlag='create_new':
-            logFile - name of the log file. Should be a string or a list of
-            strings. Should contain ".log" extension.
-            dataInDir - name of the directory which contains data. Should be a
-            string or a list of strings. If logFile is a string then this
-            argument should also be a string. If logFile is a list of strings,
-            this argument should be a list of strings, ordered in the same way
-            as logFile list.
-            logFileStyle - style of logFile set to 'biocars' by default. Other
-            possible value is 'id09'.
-            ignoreFirst - if True, the log reader will remove first image from
-            each run frim the data analysis.
-            nFiles - number of images you want to integrate in each run.
-            
-            The initialization adds a logData attribute (self.logData), which 
-            is a pandas table containing all the log information.
-            
-            (2) if initFlag='load_old':
-            loadPath - path to .h5 file where the scattering data was previously
-            stored.
-            This procedure will create all the necessary fields in the data and 
-            fill them with the data from that .h5 file.
-            
-            Successful initialization will tell you how many images and how many
-            unique time delays were measured in a given data set.
+        logFile - name of the log file. Should be a string or a list of
+        strings. Should contain ".log" extension.
+        dataInDir - name of the directory which contains data. Should be a
+        string or a list of strings. If logFile is a string then this
+        argument should also be a string. If logFile is a list of strings,
+        this argument should be a list of strings, ordered in the same way
+        as logFile list.
+        logFileStyle - style of logFile set to 'biocars' by default. Other
+        possible value is 'id09_old' and 'id09', which correspond to id09
+        styles from before 2015 and after.
+        ignoreFirst - if True, the log reader will remove first image from
+        each run frim the data analysis.
+        nFiles - number of images you want to integrate in each run. (mostly for tests)
+        
+        The initialization adds a logData attribute (self.logData), which 
+        is a pandas table containing all the log information.
+                    
+        Successful initialization will tell you how many images and how many
+        unique time delays were measured in a given data set.
             
         '''
-
-        if initFlag == 'create_new':
-            self._getLogData(logFile, logFileStyle, ignoreFirst, nFiles, dataInDir)
-            self._identifyExistingFiles(logFileStyle)
-        elif initFlag == 'load_old':
-            self.loadFromHDF(loadPath=loadPath)
-
+        self._getLogData(logFile, logFileStyle, ignoreFirst, nFiles, dataInDir)
+        self._identifyExistingFiles(logFileStyle)
         self._logSummary()
 
 
 
     def _getLogData(self, logFile, logFileStyle, ignoreFirst, nFiles, dataInDir):
+        '''
+        Read log file(s) and convert them into a pandas dataframe
+        '''
+        
         self._assertCorrectInput(logFile, dataInDir, logFileStyle)
         
         if isinstance(logFile ,str):
@@ -135,24 +139,24 @@ class ScatData:
         
         print('*** Reading log files ***')
         logDataAsList = []
-        for i,item in enumerate(logFile):
+        for i, item in enumerate(logFile):
             print('reading', item)
             if logFileStyle == 'biocars':
                 logDataAsList.append(pd.read_csv(item, sep = '\t', header = 18))
                 logDataAsList[i].rename(columns = {'#date time':'timeStamp_str', 'delay':'delay_str'}, inplace = True)
                 logDataAsList[i]['delay'] = logDataAsList[i]['delay_str'].apply(lambda x: time_str2num(x))
             
-            elif logFileStyle == 'id09':
+            elif logFileStyle == 'id09_old':
                 logDataAsList.append(pd.read_csv(item, skiprows=1, skipfooter=1, sep='\t',
-                                                 engine='python', names=_get_id09_columns(),
+                                                 engine='python', names=_get_id09_columns_old(),
                                                  skipinitialspace=True))
                 
                 logDataAsList[i]['timeStamp_str'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
                 logDataAsList[i]['delay_str'] = logDataAsList[i]['delay'].apply(lambda x: time_num2str(x))
             
-            elif logFileStyle == 'id09_new':
+            elif logFileStyle == 'id09':
                 logDataAsList.append(pd.read_csv(item, skiprows=1, skipfooter=1, sep='\t',
-                                                 engine='python', names=_get_id09_columns_new(),
+                                                 engine='python', names=_get_id09_columns(),
                                                  skipinitialspace=True))
                 
                 logDataAsList[i]['timeStamp_str'] = logDataAsList[i]['date'] + ' ' + logDataAsList[i]['time']
@@ -181,7 +185,8 @@ class ScatData:
 
 
     def _assertCorrectInput(self, logFile, dataInDir, logFileStyle):
-        ''' This method asserts the right input according to the logic described
+        '''
+        This method asserts the right input according to the logic described
         in __init__ method.
         '''
         if isinstance(logFile, str):
@@ -208,18 +213,21 @@ class ScatData:
                 assert Path(item).is_dir(), item+' not found'
         
         assert ((logFileStyle == 'biocars') or
-                (logFileStyle == 'id09') or
-                (logFileStyle == 'id09_new')), \
+                (logFileStyle == 'id09_old') or
+                (logFileStyle == 'id09')), \
         'logFileStyle can be either "biocars" or "id09"'
 
 
 
     def _identifyExistingFiles(self, logFileStyle):
+        '''
+        goes through the files listed in log files and checks if they exist
+        '''
         idxToDel = []
         for i, row in self.logData.iterrows():
-            if logFileStyle == 'id09':
+            if logFileStyle == 'id09_old':
                 self.logData.loc[i,'file'] = self.logData.loc[i,'file'].replace('ccdraw','edf')
-            elif logFileStyle == 'id09_new':
+            elif logFileStyle == 'id09':
                 self.logData.loc[i,'file'] += '.edf'
                 
             filePath = self.logData.loc[i,'dataInDir'] + self.logData.loc[i,'file']
@@ -227,11 +235,16 @@ class ScatData:
                 idxToDel.append(i)
                 print(filePath, 'does not exist and will be excluded from analysis')
         self.logData = self.logData.drop(idxToDel)
-        print('*** Done ***')
 
 
 
     def _logSummary(self):
+        '''
+        Print the log information:
+        number of files
+        number of delays
+        number of images per time delay
+        '''
         print('*** Summary ***')
         
         if not hasattr(self, 'nFiles'):
@@ -280,12 +293,18 @@ class ScatData:
             qNormRange - normalization range for the integrated curves (in A^-1)
             maskPath - path to mask image (string). It is strongly advised to
             use masks! To produce mask you can use pyFAI drawMask tool.
-            dezinger - whether you want to dezinger images  (boolean)
+            orrectPhosphor - detector absorption correction
+            muphos - absorption coef mu for phosphor screen of the detector
+            lphos - thickness of the detector phosphor screen
+            correctSample - correct for sample absorption in a flat liquid sheet
+            musample - absorption coefficient of the sample
+            lsample - thickness of the flat sheet
+            dezinger - whether you want to dezinger images  (boolean) - depreciated
             plotting - whether you want to plot the output results (boolean)
             nMax - number of Images you want to integrate. All imges will be 
             integrates if nMax is None.
             
-            Output:
+            Method updates the following fields:
             self.q - transferred momentum in A^{-1}
             self.total.s_raw - raw integrated (total) curve
                        s - total curve normalized using trapz in qNormRange
@@ -330,7 +349,9 @@ class ScatData:
             readTime = time.clock() - startReadTime
             
             startIntTime = time.clock()
-            if dezinger: image = medianDezinger(image, maskImage)
+            if dezinger:
+                print('dezingering 2d images is depreciated due to slow speed')
+                image = medianDezinger(image, maskImage)
             q, self.total.s_raw[:,i] = self.AIGeometry.ai.integrate1d(
                                                     image,
                                                     nqpt,
@@ -515,8 +536,17 @@ class ScatData:
         chisqThresh_lowq - Threshold for chisq calculated for q<q_break
         chisqThresh_highq - Threshold for chisq calculated for q>=q_break
         
+        dezinger - flag in case if you want to dezinger the 1d curves
+        dezingerThresh - threshold for dezingering (# of stds)
+        estimateCov - estimate covariance of total curves (usually not needed) 
+        useCovShrinkage - use regularized method for covariance estimation
+        covShrinkage - amount of shrinkage; if None, will be determined
+        automatically (slow)
+        
         plotting - True if you want to see the results of the outlier rejection
         chisqHistMax - maximum value of chisq you want to plot histograms
+        y_offset - amount of offset you want in the plot to show different time
+        delays
         '''
         print('*** Averaging the total curves ***')
         self.total.s_av, _, self.total.isOutlier, _, _, self.total.chisq = \
@@ -550,6 +580,10 @@ class ScatData:
                                   reference curve.
                 'Previous'      - uses previous reference curve.
                 'Next'          - uses next reference curve..
+        
+        renormalize - flag for renormalization of total curves. If True, will
+        request keyword qNormRange and will use it to update total.s field.
+        qNormRange - range for renormalization
         
         NB: the difference calculation ignores curves marked True in
         self.total.isOutlier
@@ -701,7 +735,7 @@ class ScatData:
     
     
     
-    def saveToHDF(self, savePath=None):
+    def save(self, savePath=None):
         
         assert isinstance(savePath, str), \
         'provide data output directory as a string'
@@ -756,7 +790,7 @@ class ScatData:
         
         
         
-    def loadFromHDF(self, loadPath=None):
+    def load(self, loadPath):
         
         assert isinstance(loadPath, str), \
         'Provide data output directory as a string'
@@ -809,7 +843,7 @@ class DataContainer:
         
         
     
-def _get_id09_columns():
+def _get_id09_columns_old():
     return ['date', 'time', 'file',
                     'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max',
                     'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
@@ -818,7 +852,7 @@ def _get_id09_columns():
 
 
 
-def _get_id09_columns_new():
+def _get_id09_columns():
     return ['date', 'time', 'file',
                     'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max', 'delay_n',
                     'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
@@ -1219,10 +1253,11 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
 #%%
 if __name__ == '__main__':
     # Dirty Checking: integration
-    A = ScatData(logFile = 'D:\\leshchev_1708\\Ubiquitin\\45.log',
-                 dataInDir = 'D:\\leshchev_1708\\Ubiquitin\\',
-                 dataOutDir = 'D:\\leshchev_1708\\Ubiquitin\\')
-              
+    A = ScatData()
+    A.readLog(r'E:\leshchev_1708\Ubiquitin\10.log',
+              r'E:\leshchev_1708\Ubiquitin\\')
+    
+#%%
     A.integrate(energy = 11.63,
                 distance = 364,
                 pixelSize = 82e-6,
@@ -1231,7 +1266,7 @@ if __name__ == '__main__':
                 qRange = [0.0, 4.0],
                 nqpt = 400,
                 qNormRange = [1.9,2.1],
-                maskPath = 'D:\\leshchev_1708\\Ubiquitin\\MASK_UB.edf',
+                maskPath = r'E:\leshchev_1708\Ubiquitin\MASK_UB.edf',
                 dezinger=False,
                 plotting=True)
     #%% idnetify outliers in total curves
@@ -1239,11 +1274,9 @@ if __name__ == '__main__':
     
     #%% difference calculation
     A.getDifferences(toff_str = '-5us', 
-                     subtractFlag = 'MovingAverage',
-                     dezinger=True)
+                     subtractFlag = 'MovingAverage')
     
     #%%
     
-    A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
-    #A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
-    
+#    A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
+    A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)

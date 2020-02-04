@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import os
 import time
 import pkg_resources
+import h5py
 
 class Solute:
     
@@ -494,28 +495,38 @@ class diffEnsemble:
 
 
 class Perturbation:
-    def __init__(self, pert_type, amp, n_mol=1, n_atom=1):
+    def __init__(self, pert_type, amp, n_atom=None, dxyz_vib=None):
+        self.pert_type = pert_type
         if pert_type == 'normal':
             self.amp = amp
-            self.dxyz = np.ones((n_mol, n_atom, 3)) * self.amp / np.sqrt(3)
-            self.shape = self.dxyz.shape
+            self.dxyz = np.tile(np.eye(n_atom)[:, :, None], (1, 1, 3))
+            self.dxyz *= self.amp / np.sqrt(3)
+            self.n = n_atom
+            self.shape = (1, 3)
         
-        elif pert_type == 'vibration':
-            pass
+        elif pert_type == 'vib':
+            self.amp = amp
+            self.dxyz = dxyz_vib * self.amp
+            self.n = self.dxyz.shape[0]
+            self.shape = (1, 1)
     
     
     def generate_displacement(self):
-        return (np.random.randn(*self.shape) * self.dxyz)
-
+        idx = np.random.randint(self.n)
+        shake = np.random.randn(*self.shape)
+        return (shake * self.dxyz[idx, :, :])
+        
 
 
 
 class RMC_Engine:
     def __init__(self, q, ds, sigma, dsdt,
-                 diff_ens, perturbation, reg,
+                 diff_ens, perturbation_gs, perturbation_es, reg,
+                 optimize_gs=True, optimize_es=True,
+                 rmc_temp_init=None, rmc_cool=0.6,
                  qmin=None, qmax=None,
-                 dr=0.01):
-        
+                 dr=0.01, rmax=None, rmax_margin=20,
+                 output_file=None):
         if qmin is None: qmin = q.min()
         if qmax is None: qmax = q.max()
         qsel = (q>=qmin) & (q<=qmax)
@@ -528,11 +539,17 @@ class RMC_Engine:
         self.dsdt = dsdt[qsel]
         
         self.diff_ens = diff_ens
-        self.perturbation = perturbation
+        self.perturbation_gs = perturbation_gs
+        self.perturbation_es = perturbation_es
         
         self.reg = reg
         
-        self.rmax = self._rmax()
+        self.optimize_gs = optimize_gs
+        self.optimize_es = optimize_es
+        self._idxMolSpan()
+        
+        if rmax is None: self.rmax = self._rmax(rmax_margin=rmax_margin)
+        else: self.rmax=rmax
         self.dr = dr
         
         self.ds_solu = self.calc_ds_solu()
@@ -540,19 +557,41 @@ class RMC_Engine:
         self.ds_fit, self.chisq = self._fit(self.ds_solu)
         self.penalty = self.diff_ens.var() / self.reg**2
         self.obj_fun = self.chisq + self.penalty
-        print('Starting chisq: ', self.chisq.ravel())
-        print('Starting penalty: ', self.penalty.ravel())
-        print('Starting obj_fun: ', self.obj_fun.ravel())
         
+        # define rmc temperature if it is not defined already (for example, from the previous run)
+        
+        if rmc_temp_init is None:
+            rmc_temp_init = 2*(1/self.diff_ens.n_mol_es +
+                               1/self.diff_ens.n_mol_gs)
+        self.rmc_temp = np.array(rmc_temp_init)
+        self.rmc_cool = np.array(rmc_cool)
+        
+        print('Current rmc_temp: ', self.rmc_temp.ravel())
+        print('Current chisq: ', self.chisq.ravel())
+        print('Current penalty: ', self.penalty.ravel())
+        print('Current obj_fun: ', self.obj_fun.ravel())
+        
+        self.output_file = output_file
+        
+    
+    def _idxMolSpan(self):
+        if self.optimize_gs:
+            self.idx_mol_low = 0
+        else:
+            self.idx_mol_low = self.diff_ens.n_mol_gs
+        if self.optimize_es:
+            self.idx_mol_high = self.diff_ens.n_mol_gs + self.diff_ens.n_mol_es
+        else:
+            self.idx_mol_high = self.diff_ens.n_mol_gs
 
     
-    def _rmax(self):
+    def _rmax(self, rmax_margin=20):
         self.diff_ens.mol_gs.calcDistMat()
         self.diff_ens.mol_es.calcDistMat()
         
         all_dist = np.hstack((self.diff_ens.mol_gs.dist_mat.ravel().max(),
                               self.diff_ens.mol_es.dist_mat.ravel().max()))
-        return all_dist.max()+20
+        return all_dist.max() + rmax_margin
         
         
     def calc_ds_solu(self, subset=None):
@@ -571,39 +610,82 @@ class RMC_Engine:
         return ds_fit, chisq
         
     
-    def run(self, n_steps):
+    def run(self, n_steps, iter_upd=100, iter_autosave=None, iter_converge=None,
+            con_thresh=0.01):
+#        n_steps, iter_upd, iter_autosave, iter_converge = int(n_steps), int(iter_upd), int(iter_autosave), int(iter_converge)
+
         n_cur = self.chisq.size
-        self.chisq = np.hstack((self.chisq, np.zeros(n_steps)))
-        self.penalty = np.hstack((self.penalty, np.zeros(n_steps)))
-        self.obj_fun = np.hstack((self.obj_fun, np.zeros(n_steps)))
+        self.chisq = np.hstack((self.chisq, np.zeros(n_steps)*np.nan))
+        self.penalty = np.hstack((self.penalty, np.zeros(n_steps)*np.nan))
+        self.obj_fun = np.hstack((self.obj_fun, np.zeros(n_steps)*np.nan))
+        self.rmc_temp = np.hstack((self.rmc_temp, np.zeros(n_steps)*np.nan))
+        
+        
+        # define number of steps sufficient to check convergence
+        if iter_converge is None:
+            iter_converge = 1 * self.diff_ens.n_atom * (self.diff_ens.n_mol_es +
+                                                       self.diff_ens.n_mol_gs)
         
         startIntTime = time.clock()
+        
         for i in range(n_cur, n_steps+n_cur):
-            if i % 100 == 0:
+            
+            # progress/timing tracker
+            if i % iter_upd == 0:
                 interval = time.clock() - startIntTime
-                print('Progress: ', i, '/', n_cur+n_steps, '| Average interation time: %.0f' % (interval/100*1e3), 'ms')
+                print('Progress: ', i, '/', n_cur+n_steps, '| Average interation time: %.0f' % (interval/iter_upd*1e3), 'ms')
                 startIntTime = time.clock()
-                
-            self.ds_solu, self.ds_fit, self.chisq[i], self.penalty[i], self.obj_fun[i] = self.step(self.chisq[i-1],
-                                                                           self.penalty[i-1],
-                                                                           self.obj_fun[i-1])
+            
+            # actual RMC step calculation
+            step_result = self.step(self.chisq[i-1],
+                                    self.penalty[i-1],
+                                    self.obj_fun[i-1],
+                                    self.rmc_temp[i-1]) # inverse RMC temperature
+            self.ds_solu, self.ds_fit, self.chisq[i], self.penalty[i], self.obj_fun[i] = step_result
+            
+            # convergence checker
+            if i % iter_converge == 0:
+                if self.isConverged(self.obj_fun[-iter_converge:], con_thresh):
+#                    print('CONVERGED')
+                    break
+            
+            # cooling checker
+            if i % iter_converge == 0:
+                if self.isEquilibrated(self.obj_fun[-iter_converge:]):
+                    self.rmc_temp[i] *= self.rmc_cool
+                    print('Ensemble equilibrated; RMC temperature now is', self.rmc_temp[i])
+            else:
+                self.rmc_temp[i] = self.rmc_temp[i-1]
+            
+            # autosaver
+            if (iter_autosave is not None) and (self.output_file is not None):
+                if i % iter_autosave == 0:
+                    self.save(self.output_file)
+                    
+        
         self.diff_ens.calcGR()
+        if self.output_file is not None:
+            self.save(self.output_file)
+            
+        print('Converged:', self.isConverged(self.obj_fun[-iter_converge:], con_thresh))
             
         
         
-    def step(self, chisq, penalty, obj_fun):
-        idx_mol = np.random.randint(self.diff_ens.n_mol_gs + 
-                                    self.diff_ens.n_mol_es,
-                                    size=(self.perturbation.shape[0],))
-        idx_atom = np.random.randint(self.diff_ens.n_atom,
-                                     size=(self.perturbation.shape[1],))
+    def step(self, chisq, penalty, obj_fun, rmc_temp):
+        idx_mol, flag_mol = self._selectMolecule()
         
-        dxyz = self.perturbation.generate_displacement().squeeze()
+        if flag_mol=='gs':
+            dxyz = self.perturbation_gs.generate_displacement()
+#            print('gs', end='')
+        elif flag_mol=='es':
+            dxyz = self.perturbation_es.generate_displacement()
+#            print('es', end='')
         
         ds_subset = self.calc_ds_solu(subset=idx_mol)
         penalty_subset = self.diff_ens.var(subset=idx_mol) / self.reg**2
         
-        self.diff_ens.xyz[idx_mol, idx_atom, :] += dxyz
+#        self.diff_ens.xyz[idx_mol, idx_atom, :] += dxyz
+        self.diff_ens.xyz[idx_mol, :, :] += dxyz
         
         ds_subset_upd = self.calc_ds_solu(subset=idx_mol)
         penalty_subset_upd = self.diff_ens.var(subset=idx_mol) / self.reg**2
@@ -616,17 +698,217 @@ class RMC_Engine:
         
         dobj_fun = obj_fun_upd - obj_fun
         
-        prob = np.exp(-dobj_fun/2*1e3)
+        prob = np.exp(-dobj_fun/rmc_temp/2)
         x = np.random.rand()
         
         if x < prob: # accept
+#            print('accept', end=' ')
             return ds_solu_upd, ds_fit_upd, chisq_upd, penalty_upd, obj_fun_upd
         else: # reject
-            self.diff_ens.xyz[idx_mol, idx_atom, :] -= dxyz
+#            print('reject', end=' ')
+#            self.diff_ens.xyz[idx_mol, idx_atom, :] -= dxyz
+            self.diff_ens.xyz[idx_mol, :, :] -= dxyz
             return self.ds_solu, self.ds_fit, chisq, penalty, obj_fun
         
+    
+    def _selectMolecule(self):
+        idx_mol = np.random.randint(self.idx_mol_low,
+                                    high=self.idx_mol_high, size=(1))
+        if idx_mol < self.diff_ens.n_mol_gs:
+            flag_mol = 'gs'
+        else:
+            flag_mol = 'es'
+        return idx_mol, flag_mol
+    
+    
         
+    def isEquilibrated(self, v, deg=3, minThresh=0.1):
+        if (np.abs(v[0] - v[-1]) > minThresh):
+            return False
+        else:
+            x = np.arange(v.size)
+            p = np.polyfit(x, v, deg)
+            v_fit = np.polyval(p, x)
+            r = v - v_fit
+            sig = np.std(r)
             
+            if ((v[0] - v[-1]) <= 4*sig):
+                return True
+            else:
+                return False
+            
+    def isConverged(self, v, threshold):
+        return ((v.max() - v.min()) < threshold)
+    
+    
+        
+    def save(self, filepath):
+        try:
+            f = h5py.File(filepath, 'w')
+            f.create_dataset('q', data=self.q)
+            f.create_dataset('ds', data=self.ds)
+            f.create_dataset('sigma', data=self.sigma)
+            f.create_dataset('dsdt', data=self.dsdt)
+            f.create_dataset('reg', data=self.reg)
+            f.create_dataset('rmax', data=self.rmax)
+            f.create_dataset('dr', data=self.dr)
+            f.create_dataset('ds_solu', data=self.ds_solu)
+            f.create_dataset('ds_fit', data=self.ds_fit)
+            f.create_dataset('chisq', data=self.chisq)
+            f.create_dataset('penalty', data=self.penalty)
+            f.create_dataset('obj_fun', data=self.obj_fun)
+            f.create_dataset('rmc_temp', data=self.rmc_temp)
+            f.create_dataset('rmc_cool', data=self.rmc_cool)
+            f.create_dataset('optimize_gs', data=self.optimize_gs)
+            f.create_dataset('optimize_es', data=self.optimize_es)
+        
+            f.create_dataset('diff_ens/n_mol_gs', data=self.diff_ens.n_mol_gs)
+            f.create_dataset('diff_ens/n_mol_es', data=self.diff_ens.n_mol_es)
+            f.create_dataset('diff_ens/xyz', data=self.diff_ens.xyz)
+            f.create_dataset('diff_ens/mol_gs/Z_num', data=self.diff_ens.mol_gs.Z_num)
+            f.create_dataset('diff_ens/mol_gs/xyz', data=self.diff_ens.mol_gs.xyz)
+            f.create_dataset('diff_ens/mol_es/Z_num', data=self.diff_ens.mol_es.Z_num)
+            f.create_dataset('diff_ens/mol_es/xyz', data=self.diff_ens.mol_es.xyz)
+            f.create_dataset('diff_ens/r', data=self.diff_ens.r)
+            
+            f.create_dataset('perturbation_gs/pert_type', data=self.perturbation_gs.pert_type)
+            f.create_dataset('perturbation_gs/amp', data=self.perturbation_gs.amp)
+            f.create_dataset('perturbation_gs/dxyz', data=self.perturbation_gs.dxyz)
+            f.create_dataset('perturbation_gs/shape', data=self.perturbation_gs.shape)
+            f.create_dataset('perturbation_gs/n', data=self.perturbation_gs.n)
+            
+            f.create_dataset('perturbation_es/pert_type', data=self.perturbation_es.pert_type)
+            f.create_dataset('perturbation_es/amp', data=self.perturbation_es.amp)
+            f.create_dataset('perturbation_es/dxyz', data=self.perturbation_es.dxyz)
+            f.create_dataset('perturbation_es/shape', data=self.perturbation_es.shape)
+            f.create_dataset('perturbation_es/n', data=self.perturbation_es.n)
+            
+            rnd_st = np.random.get_state()
+            for i in range(len(rnd_st)):
+                key = 'random_state/t' + str(i)
+                f.create_dataset(key, data=rnd_st[i])
+            
+        except OSError as err:
+            print(err)
+        
+        if 'f' in locals():
+            f.close()
+        
+        
+    def plot_stats(self, num=None):
+        if num is None:
+            num=1001
+        plt.figure(num)
+        plt.gcf().clf()
+        fig, ax1 = plt.subplots(num=num)
+        
+        color = 'tab:red'
+        ax1.set_ylabel('chisq/obj_fun', color=color)  # we already handled the x-label with ax1
+        p1 = ax1.plot(self.chisq, color=color, linestyle=':', label='chisq')
+        p2 = ax1.plot(self.obj_fun, color=color, label='obj_fun')
+        ax1.tick_params(axis='y', labelcolor=color)
+        ax1.set_xlabel('number of RMC steps')
+        
+        
+        ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+        
+        color = 'tab:blue'
+        ax2.set_ylabel('penalty', color=color)  # we already handled the x-label with ax1
+        p3 = ax2.plot(self.penalty, color=color, label='penalty')
+        ax2.tick_params(axis='y', labelcolor=color)
+        
+        
+        # added these three lines
+        p = p2 + p1 + p3
+        labs = [k.get_label() for k in p]
+        ax1.legend(p, labs, loc=5)
+        
+        fig.tight_layout()  # otherwise the right y-label is slightly clipped
+
+
+        
+        
+        
+def load_RMC_Engine(filepath, output_file=None):
+    f = h5py.File(filepath, 'r')
+    
+    q = f['q'].value
+    ds = f['ds'].value
+    sigma = f['sigma'].value
+    dsdt = f['dsdt'].value
+    reg = f['reg'].value
+    dr = f['dr'].value
+    rmax = f['rmax'].value
+    optimize_gs = f['optimize_gs'].value
+    optimize_es = f['optimize_es'].value
+    
+    # get diff ensemble
+    n_mol_gs = f['diff_ens/n_mol_gs'].value
+    n_mol_es = f['diff_ens/n_mol_es'].value
+    Z_gs = [z_num2str(z) for z in f['diff_ens']['mol_gs/Z_num'].value]
+    Z_es = [z_num2str(z) for z in f['diff_ens']['mol_es/Z_num'].value]
+    Z_gs = np.array(Z_gs)
+    Z_es = np.array(Z_es)
+    xyz_gs = f['diff_ens/mol_gs/xyz'].value
+    xyz_es = f['diff_ens/mol_es/xyz'].value
+    mol_gs = Molecule(Z_gs, xyz_gs)
+    mol_es = Molecule(Z_es, xyz_es)
+    diff_ens = diffEnsemble(mol_gs, mol_es, n_mol_gs, n_mol_es)
+    diff_ens.xyz = f['diff_ens/xyz'].value
+    diff_ens.r = f['diff_ens/r'].value
+    diff_ens.calcGR()
+    
+    # get perturbation_gs
+    pert_type = f['perturbation_gs/pert_type'].value
+    amp = f['perturbation_gs/amp'].value
+    dxyz = f['perturbation_gs/dxyz'].value
+#    shape = f['perturbation_gs/shape'].value
+    n = f['perturbation_gs/n'].value
+    perturbation_gs = Perturbation(pert_type, amp, n_atom=n, dxyz_vib=dxyz)
+    perturbation_gs.dxyz = dxyz
+    
+    # get perturbation_es
+    pert_type = f['perturbation_es/pert_type'].value
+    amp = f['perturbation_es/amp'].value
+    dxyz = f['perturbation_es/dxyz'].value
+#    shape = f['perturbation_es/shape'].value
+    n = f['perturbation_es/n'].value
+    perturbation_es = Perturbation(pert_type, amp, n_atom=n, dxyz_vib=dxyz)
+    perturbation_es.dxyz = dxyz
+             
+    engine = RMC_Engine(q, ds, sigma, dsdt,
+                        diff_ens, perturbation_gs, perturbation_es, reg,
+                        optimize_gs=optimize_gs,
+                        optimize_es=optimize_es,
+                        qmin=None, qmax=None,
+                        dr=dr, rmax=rmax,
+                        output_file=output_file)
+    
+    # fitting stats
+    engine.chisq = f['chisq'].value
+    engine.penalty = f['penalty'].value
+    engine.obj_fun = f['obj_fun'].value
+    engine.rmc_temp = f['rmc_temp'].value
+    
+    bad_values = np.isnan(engine.chisq)
+    engine.chisq = engine.chisq[~bad_values]
+    engine.penalty = engine.penalty[~bad_values]
+    engine.obj_fun = engine.obj_fun[~bad_values]
+    engine.rmc_temp = engine.rmc_temp[~bad_values]
+    
+    # restore the state of the random generator for reproducibility
+    rnd_st = []
+    for i in range(5):
+        key = 'random_state/t' + str(i)
+        rnd_st.append(f[key].value)
+    np.random.set_state(tuple(rnd_st))
+    
+    f.close()
+    return engine
+        
+    
+        
+        
         
 ### UTILS
 
@@ -687,8 +969,8 @@ def Debye(q, mol, f=None, atomOnly=False):
 #            Scoh += f[el1]*f[el2]*np.sum(np.sin(qr12)/qr12, axis=1)
     natoms = mol.Z.size
     for idx1 in range(natoms):
-        for idx2 in range(idx1+1, natoms):
-            if not atomOnly:
+        if not atomOnly:
+            for idx2 in range(idx1+1, natoms):
                 r12 = mol.dist_mat[idx1, idx2]
                 qr12 = q*r12
                 Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12)/qr12
@@ -827,6 +1109,22 @@ def Solvent(name_str):
                         [-1.1329, -0.0768, -1.6251],               
                         [ 1.1290,  0.8924, -2.0303],               
                         [ 1.1300,  1.5904, -0.3493]])
+    elif name_str == 'thf':
+        # structure is taken from SI of Cryst. Growth Des., 2015, 15 (3), pp 1073–1081 DOI: 10.1021/cg501228w
+        Z = np.array(['O']*1 + ['C']*4 + ['H']*8)
+        xyz = np.array([[ 0.000760889, -0.000738525, -1.456851081],
+                        [-0.652804737, -0.977671000, -0.666797608],
+                        [-0.135276924, -0.754196802,  0.753993299],
+                        [ 0.652965710,  0.977170235, -0.666602790],
+                        [ 0.134622392,  0.755233684,  0.754352491],
+                        [-1.737556125, -0.829010551, -0.720475115],
+                        [-0.415216782, -1.967675331, -1.059040344],
+                        [-0.850969390, -1.066076288,  1.514860077],
+                        [ 0.796865925, -1.302852121,  0.910687964],
+                        [ 1.737518733,  0.828788014, -0.720974308],
+                        [ 0.414866234,  1.967002482, -1.058148213],
+                        [ 0.850649795,  1.065510448,  1.514996321],
+                        [-0.796426720,  1.304515754,  0.911888645]])
     else:
         return None
     return Molecule(Z, xyz)
