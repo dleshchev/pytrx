@@ -30,6 +30,12 @@ import h5py
 import pyFAI
 import fabio
 
+from matplotlib.lines import Line2D
+
+custom_lines = [Line2D([0], [0], color='k', lw=1),
+                Line2D([0], [0], color='b', lw=1),
+                Line2D([0], [0], color='r', lw=1)]
+
 
 class ScatData:
     ''' This is a class for processing, storage, and loading of time resolved
@@ -965,10 +971,10 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
     if chisqThresh.size>1:
         q_break = np.array(q_break)
         assert q_break.size == (chisqThresh.size - 1)
-        q_break = np.hstack((q.min()-1, q_break, q.max()+1))
+        q_break = np.hstack((q.min()-1e-6, q_break, q.max()+1e-6))
     else:
         chisqThresh = chisqThresh[None]
-        q_break = np.array([q.min()-1, q.max()+1])
+        q_break = np.array([q.min()-1e-6, q.max()+1e-6])
 
     chisq = np.zeros((chisqThresh.size, delay_str.size))
 
@@ -1032,22 +1038,9 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
 
 
     if plotting:
-        pass
-    #        if y_offset is None:
-    #            y_offset = (np.max(np.percentile(x, 95, axis=1)) -
-    #                        np.min(np.percentile(x,  5, axis=1)))*1.1
-    #        else:
-    #            assert type(y_offset)==float, 'y_offset should be either float or None'
-
-    #        plt.figure(figsize = (t_str.size*2,4))
-    #        plt.clf()
-    #
-    #        if plotting:
-    #            subidx = i
-    #            plotOutliers(q, x_loc, isOutlier_loc,
-    #                         chisq, chisqThresh,
-    #                         q_break, chisq_lowq, chisqThresh_lowq, chisq_highq, chisqThresh_highq,
-    #                         chisqHistMax, subidx, y_offset)
+        plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
+                     chisqThresh, q_break,
+                     chisqHistMax, y_offset)
 
     return x_av, x_err, isOutlier, covtt, covqq, chisq
 
@@ -1120,59 +1113,64 @@ def getMedianSelection(z_orig, frac):
     return z
 
 
-def plotOutliers(q, x, isOutlier, chisq,
+def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
                  chisqThresh, q_break,
                  chisqHistMax, y_offset):
     ''' Fucntion to plot data and corresponding chisq histograms.
     '''
 
+    if len(chisq.shape)==1:
+        chisq = chisq[None, :]
 
+    if y_offset is None:
+        y_offset = np.abs(np.max(x[:, ~isOutlier]) - np.min(x[:, ~isOutlier]))
+
+
+    plt.figure(figsize=(12,7))
     plt.subplot(121)
+    for i, each_t in enumerate(t_str):
+        y_offset_i = y_offset * i
+        sel_loc = delay_str == each_t
+        x_loc = x[:, sel_loc]
+        isOutlier_loc = isOutlier[sel_loc]
+        x_av_loc = np.mean(x_loc[:, ~isOutlier_loc], axis=1)
+        print(x_loc[:, isOutlier_loc], x_loc[:, isOutlier_loc].size)
+        plt.plot(q, x_loc[:, ~isOutlier_loc] - y_offset_i, 'k-', alpha=0.33)
+        if x_loc[:, isOutlier_loc].size>0:
+            plt.plot(q, x_loc[:, isOutlier_loc] - y_offset_i, 'b-')
+        plt.plot(q, x_av_loc - y_offset_i, 'r-')
+        plt.text(q.min() + (q.max()-q.min())*0.75, y_offset*0.5 - y_offset_i, each_t, va='center', ha='center',
+                 backgroundcolor='w')
 
+    plt.hlines(-np.arange(chisqThresh.size) * y_offset, q.min(), q.max())
+    plt.legend(custom_lines, ['Data', 'Outliers', 'Mean'])
+    plt.xlim(q.min(), q.max())
+    plt.xlabel('q, A$^{-1}$')
+    plt.ylabel('scaled S, a.u.')
+    plt.title('Averaging result')
 
-
-    plt.plot([q[0], q[-1]], np.array([0, 0]) - subidx * y_offset, '-', color=(0.5, 0.5, 0.5))
-    if any(isOutlier):
-        plt.plot(q, x[:, isOutlier] - subidx * y_offset, 'b-')
-    if any(~isOutlier):
-        x_mean = np.mean(x[:, ~isOutlier], axis=1)
-        plt.plot(q, x[:, ~isOutlier] - subidx * y_offset, 'k-')
-        plt.plot(q, x_mean - subidx * y_offset, 'r-')
-
-    plt.xlabel('q, A^-1')
-    plt.ylabel('Intentsity, a.u.')
-    plt.title('Curve selection. \n Blue - outliers, Black - Selected data, Red - average')
-    #    plt.legend()
-
-    plt.subplot(122)
+    YLIM = plt.ylim()
     chisqBins = np.concatenate((np.arange(0, chisqHistMax + 0.5, 0.5),
                                 np.array(np.inf)[np.newaxis]))
-    chisqWidths = np.diff(chisqBins)
-    chisqWidths[-1] = 1
-    if not q_break:
-        heights, _ = np.histogram(chisq, bins=chisqBins)
-        heights = heights / np.max(heights) * y_offset * 0.9
-        plt.plot([chisqBins[0], chisqBins[-2]], np.array([0, 0]) - subidx * y_offset, '-', color=(0.5, 0.5, 0.5))
-        plt.plot(chisqBins[:-1], heights - subidx * y_offset, 'k.-')
-        plt.plot(chisqThresh * np.array([1, 1]), np.array([0, 0.9]) * y_offset - subidx * y_offset, 'k--')
-        plt.xlabel('\chi^2')
-        plt.ylabel('n. occurances')
-        plt.title('\chi^2 occurances')
 
-    else:
-        heights_lowq, _ = np.histogram(chisq_lowq, bins=chisqBins)
-        heights_highq, _ = np.histogram(chisq_highq, bins=chisqBins)
-        heights_lowq = heights_lowq / np.max(heights_lowq) * y_offset * 0.9
-        heights_highq = heights_highq / np.max(heights_highq) * y_offset * 0.9
+    plt.subplot(122)
+    for i, each_thresh in enumerate(chisqThresh):
+        y_offset_i = y_offset * i
+        chisq_loc = chisq[i, :]
+        heights, _ = np.histogram(chisq_loc, bins=chisqBins)
+        heights = heights / np.max(heights) * y_offset * 0.95
+        plt.bar(chisqBins[:-1], heights, bottom=-y_offset_i, color='k')
+        plt.plot([each_thresh, each_thresh], [-y_offset_i, -y_offset_i + y_offset], 'k--')
+        plt.text(each_thresh, y_offset * 0.9 - y_offset_i, 'Threshold', va='center', ha='center', backgroundcolor='w')
+        plt.text(chisqBins.min() + (chisqBins[:-2].max() - chisqBins.min()) * 0.75,
+                 y_offset * 0.5- y_offset_i, f'chisq for {np.round(q_break[i],2)}<q<{np.round(q_break[i+1],2)}',
+                 va='center', ha='center', backgroundcolor='w')
 
-        plt.plot([chisqBins[0], chisqBins[-2]], np.array([0, 0]) - subidx * y_offset, '-', color=(0.5, 0.5, 0.5))
-        plt.plot(chisqBins[:-1], heights_lowq - subidx * y_offset, 'b.-')
-        plt.plot(chisqBins[:-1], heights_highq - subidx * y_offset, 'r.-')
-        plt.plot(chisqThresh_lowq * np.array([1, 1]), np.array([0, 0.9]) * y_offset - subidx * y_offset, 'b--')
-        plt.plot(chisqThresh_highq * np.array([1, 1]), np.array([0, 0.9]) * y_offset - subidx * y_offset, 'r--')
-        plt.xlabel('\chi_lowq^2')
-        plt.ylabel('n. occurances')
-        plt.title('\chi^2 occurances\nBlue - low q, Red - high q')
+    plt.hlines(-np.arange(chisqThresh.size)*y_offset, chisqBins[0], chisqBins[-2])
+    plt.xlim(chisqBins[0], chisqBins[-2])
+    plt.ylim(YLIM)
+    plt.ylabel('Occurances')
+    plt.xlabel('chisq value')
 
 
 def rescaleQ(q_old, wavelength, dist_old, dist_new):
@@ -1185,22 +1183,25 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
 # %%
 if __name__ == '__main__':
     # Dirty Checking: integration
-    A = ScatData(r'C:\work\Experiments\2017\Ubiquitin\10.log',
-              r'C:\work\Experiments\2017\Ubiquitin\\')
+    A = ScatData(r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run1\diagnostics.log',
+                 logFileStyle='id09_old',
+                 nFirstFiles=25)
 
     # %%
-    A.integrate(energy=11.63,
-                distance=364,
-                pixelSize=82e-6,
-                centerX=1987,
-                centerY=1965,
-                qRange=[0.0, 4.0],
-                nqpt=400,
-                qNormRange=[1.9, 2.1],
-                maskPath=r'C:\work\Experiments\2017\Ubiquitin\MASK_UB.edf',
+    A.integrate(energy = 25.2,
+                distance = 44.75,
+                pixelSize = 0.000104388,
+                centerX = 469.25,
+                centerY = 599.5,
+                qRange = [0.39, 12.01],
+                nqpt = 465,
+                qNormRange = [5.00, 10.00],
+                maskPath = r"C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\ru=co_mask.edf",
+                correctPhosphor=True, muphos=92.8, lphos=75e-4,
+                correctSample=True, musample=0.29, lsample=300e-4,
                 plotting=True)
     # %% idnetify outliers in total curves
-    A.getTotalAverages(fraction=0.9, chisqThresh=6)
+    A.getTotalAverages(fraction=0.9, chisqThresh=[6,4], q_break=5)
 #
 #    # %% difference calculation
 #    A.getDifferences(toff_str='-5us',
