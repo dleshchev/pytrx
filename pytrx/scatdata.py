@@ -437,7 +437,7 @@ class ScatData:
 
     def plotIntegrationResult(self):
         # get min and max of scale for average image
-        vmin, vmax = np.percentile(self.imageAv[self.imageAv != 0], (5, 95))
+        vmin, vmax = np.percentile(self.imageAv[self.imageAv != 0], (1, 99))
 
         plt.figure(figsize=(12, 5))
         plt.clf()
@@ -449,8 +449,8 @@ class ScatData:
                   -self.AIGeometry.centerY + y,
                   -self.AIGeometry.centerY]
         plt.imshow(self.imageAv, vmin=vmin, vmax=vmax, extent=extent, cmap='Greys')
-        plt.hlines(0, extent[2], extent[3], colors='r')
-        plt.vlines(0, extent[0], extent[1], colors='r')
+        plt.vlines(0, extent[2], extent[3], colors='r')
+        plt.hlines(0, extent[0], extent[1], colors='r')
         plt.xlim(extent[:2])
         plt.ylim(extent[2:])
         plt.colorbar()
@@ -526,7 +526,7 @@ class ScatData:
                        fraction, chisqThresh, q_break,
                        dezinger=dezinger, dezingerThresh=dezingerThresh, covShrinkage=covShrinkage,
                        plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset)
-        print('*** Done ***')
+        print('*** Done ***\n')
 
     # 3. Difference calculation
 
@@ -639,7 +639,7 @@ class ScatData:
         self.diff.isOutlier = np.ravel((np.sum(self.diff.Adiff,
                                                axis=1) > 1e-6))  # argument of np.ravel is of matrix type which has ravel method working differently from np.ravel; we need np.ravel!
         print('')
-        print('*** Done with the difference curves ***')
+        print('*** Done ***\n')
 
     def _findOffIdx(self, idx, direction):
         idx_start = idx
@@ -687,7 +687,7 @@ class ScatData:
                        dezinger=dezinger, dezingerThresh=dezingerThresh,
                        estimateCov=estimateCov, useCovShrinkage=useCovShrinkage,
                        covShrinkage=covShrinkage)
-        print('*** Done ***')
+        print('*** Done ***\n')
 
     # 5. Saving
 
@@ -742,7 +742,7 @@ class ScatData:
 
         f.close()
 
-        print('*** Done ***')
+        print('*** Done ***\n')
 
     def load(self, loadPath):
 
@@ -982,7 +982,7 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
     # Amean is defined such that x_mean @ Amean = X
     Amean = np.zeros((t_str.size, delay_str.size))
 
-    print('Identifying outliers ... ', end='');
+    print('Identifying outliers ... ');
     outlierStartTime = time.perf_counter()
 
     for i, delay_point in enumerate(t_str):
@@ -991,7 +991,7 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
 
         isOutlier_loc, chisq_loc, isHotPixel_loc = identifyOutliers(
             q, x_loc, fraction, chisqThresh, q_break, dezingerThresh=dezingerThresh)
-
+        print(f'Acceptance for {delay_point}: {np.sum(~isOutlier_loc)}/{isOutlier_loc.size}')
         isOutlier[delay_selection] = isOutlier_loc
         chisq[:, delay_selection] = chisq_loc
 
@@ -1002,7 +1002,7 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
 
         Amean[i, delay_selection & ~isOutlier] = 1
 
-    print('done ( %3.f' % ((time.perf_counter() - outlierStartTime) * 1000), 'ms )')
+    print('... done ( %3.f' % ((time.perf_counter() - outlierStartTime) * 1000), 'ms )')
 
     print('Averaging ... ', end='');
     averageStartTime = time.perf_counter()
@@ -1134,12 +1134,13 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
         x_loc = x[:, sel_loc]
         isOutlier_loc = isOutlier[sel_loc]
         x_av_loc = np.mean(x_loc[:, ~isOutlier_loc], axis=1)
-        print(x_loc[:, isOutlier_loc], x_loc[:, isOutlier_loc].size)
         plt.plot(q, x_loc[:, ~isOutlier_loc] - y_offset_i, 'k-', alpha=0.33)
         if x_loc[:, isOutlier_loc].size>0:
             plt.plot(q, x_loc[:, isOutlier_loc] - y_offset_i, 'b-')
         plt.plot(q, x_av_loc - y_offset_i, 'r-')
-        plt.text(q.min() + (q.max()-q.min())*0.75, y_offset*0.5 - y_offset_i, each_t, va='center', ha='center',
+        # print(np.sum(~isOutlier_loc), isOutlier_loc)
+        msg = f'{each_t}\n{np.sum(~isOutlier_loc)}/{len(isOutlier_loc)}'
+        plt.text(q.min() + (q.max()-q.min())*0.75, y_offset*0.5 - y_offset_i, msg, va='center', ha='center',
                  backgroundcolor='w')
 
     plt.hlines(-np.arange(chisqThresh.size) * y_offset, q.min(), q.max())
