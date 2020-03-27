@@ -128,14 +128,20 @@ class ScatData:
 
     def initializeLogFile(self, logFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir):
         if dataInDir is None:
-            dataInDir = str(Path(logFile).parent.absolute()) + '\\'
+            if type(logFile) is str:
+                dataInDir = str(Path(logFile).parent.absolute()) + '\\'
+            else:
+                dataInDir = [(str(Path(i).parent.absolute()) + '\\') for i in logFile]
         self.logFile = logFile
         self.dataInDir = dataInDir
         self.logFileStyle = logFileStyle
         self.ignoreFirst = ignoreFirst
         self.nFirstFiles = nFirstFiles
+
+        self._assertCorrectInput()
         self._getLogData()
         self._identifyExistingFiles()
+
         self.logSummary()
 
 
@@ -143,9 +149,6 @@ class ScatData:
         '''
         Read log file(s) and convert them into a pandas dataframe
         '''
-
-        self._assertCorrectInput()
-
         if isinstance(self.logFile, str):
             self.logFile = [self.logFile]  # convert to list for smooth handling
 
@@ -695,6 +698,14 @@ class ScatData:
                        plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset)
         print('*** Done ***\n')
 
+
+    def plotDiffAverages(self, fig=None, y_offset=None, x_txt=None, y_txt=None, qpower=0):
+        if fig is None:
+            plt.figure()
+        else:
+            plt.figure(fig)
+        plotAvData(self.q, self.diff.ds_av, self.t_str, y_offset=y_offset, x_txt=x_txt, y_txt=y_txt, qpower=qpower)
+
     # 5. Saving
 
     def save(self, savePath=None):
@@ -1052,6 +1063,30 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
     plt.xlabel('chisq value')
 
 
+def plotAvData(q, x, t_str, y_offset=None, x_txt=None, y_txt=None, qpower=0):
+    x_mult = x * q[:, None]**qpower
+
+    if y_offset is None:
+        y_offset = np.abs(x_mult.max() - x_mult.min())
+    if x_txt is None:
+        x_txt = q.min() + 0.8*(q.max() - q.min())
+    if y_txt is None:
+        y_txt = y_offset*0.15
+
+    for i, each_t in enumerate(t_str):
+        y_offset_i = y_offset * i
+        plt.plot(q, x_mult[:, i] - y_offset_i, 'k.-')
+        plt.text(x_txt, y_txt - y_offset_i, each_t)
+    plt.hlines(-np.arange(len(t_str))*y_offset, q.min(), q.max(), colors=[0.5, 0.5, 0.5], linewidths=0.5)
+
+    plt.xlabel('q, 1/A')
+    if qpower == 0:
+        plt.ylabel('S, a.u.')
+    else:
+        plt.ylabel(f'q^{qpower}*S, a.u.')
+    plt.xlim(q.min(), q.max())
+
+
 def rescaleQ(q_old, wavelength, dist_old, dist_new):
     tth_old = 2 * np.arcsin(wavelength * q_old / 4 / pi)
     r = np.arctan(tth_old) * dist_old
@@ -1061,7 +1096,7 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
 if __name__ == '__main__':
     A = ScatData(r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run1\diagnostics.log',
                  logFileStyle='id09_old',
-                 nFirstFiles=25)
+                 nFirstFiles=2000)
 
     # %%
     A.integrate(energy=25.2,
@@ -1075,7 +1110,7 @@ if __name__ == '__main__':
                 maskPath=r"C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\ru=co_mask.edf",
                 correctPhosphor=True, muphos=92.8, lphos=75e-4,
                 correctSample=True, musample=0.29, lsample=300e-4,
-                plotting=True)
+                plotting=False)
     # %% idnetify outliers in total curves
     A.getTotalAverages(fraction=0.9, chisqThresh=[6, 4], q_break=5, plotting=False)
     #
