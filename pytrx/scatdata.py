@@ -30,8 +30,10 @@ import h5py
 import pyFAI
 import fabio
 
-from matplotlib.lines import Line2D
+from utils import DataContainer, _get_id09_columns_old, _get_id09_columns, time_str2num, time_num2str
 
+
+from matplotlib.lines import Line2D
 custom_lines = [Line2D([0], [0], color='k', lw=1),
                 Line2D([0], [0], color='b', lw=1),
                 Line2D([0], [0], color='r', lw=1)]
@@ -90,7 +92,7 @@ class ScatData:
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
 
-    def __init__(self, logFile, logFileStyle='biocars', ignoreFirst=False, nFirstFiles=None, dataInDir=None):
+    def __init__(self, inputFile, logFileStyle='biocars', ignoreFirst=False, nFirstFiles=None, dataInDir=None):
         '''
         To read the file:
 
@@ -115,6 +117,16 @@ class ScatData:
         unique time delays were measured in a given data set.
 
         '''
+
+        extension = Path(inputFile).suffix
+        if extension == '.log':
+            self.initializeLogFile(inputFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir)
+        elif extension == '.h5':
+            self.initializeFromH5(inputFile)
+
+
+
+    def initializeLogFile(self, logFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir):
         if dataInDir is None:
             dataInDir = str(Path(logFile).parent.absolute()) + '\\'
         self.logFile = logFile
@@ -386,6 +398,10 @@ class ScatData:
         self.imageAv = self.imageAv / (i + 1)
         self.imageAv[maskImage == 1] = 0
 
+        weights = 1 / self.total.normInt
+        weights /= np.median(weights)
+        self.total.covii = np.diag(weights)
+
         if plotting:
             self.plotIntegrationResult()
 
@@ -403,9 +419,9 @@ class ScatData:
         self.AIGeometry.pixelSize = pixelSize
         self.AIGeometry.centerX = centerX
         self.AIGeometry.centerY = centerY
-        self.AIGeometry.qRange = qRange
+        self.AIGeometry.qRange = np.array(qRange)
         self.AIGeometry.nqpt = nqpt
-        self.AIGeometry.qNormRange = qNormRange
+        self.AIGeometry.qNormRange = np.array(qNormRange)
         self.AIGeometry.ai = self._getai()
 
 
@@ -521,8 +537,9 @@ class ScatData:
         delays
         '''
         print('*** Averaging the total curves ***')
-        self.total.s_av, _, self.total.isOutlier, _, _, self.total.chisq = \
-            getAverage(self.q, self.total.s, None, self.total.isOutlier, self.total.delay_str, self.t_str, None,
+        self.total.s_av, self.total.s_err, self.total.isOutlier, self.total.covtt, self.total.covqq, self.total.chisq = \
+            getAverage(self.q, self.total.s, self.total.covii, self.total.isOutlier,
+                       self.total.delay_str, self.t_str, None,
                        fraction, chisqThresh, q_break,
                        dezinger=dezinger, dezingerThresh=dezingerThresh, covShrinkage=covShrinkage,
                        plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset)
@@ -567,7 +584,7 @@ class ScatData:
         '''
         print('*** Calculating the difference curves ***')
         if renormalize:
-            self.AIGeometry.qNormRange = qNormRange
+            self.AIGeometry.qNormRange = np.array(qNormRange)
             self.total.normInt, self.total.s = normalizeQ(self.q, self.total.s_raw, qNormRange)
 
         self.diff = DataContainer()
@@ -638,7 +655,6 @@ class ScatData:
 
         self.diff.isOutlier = np.ravel((np.sum(self.diff.Adiff,
                                                axis=1) > 1e-6))  # argument of np.ravel is of matrix type which has ravel method working differently from np.ravel; we need np.ravel!
-        print('')
         print('*** Done ***\n')
 
     def _findOffIdx(self, idx, direction):
@@ -659,34 +675,24 @@ class ScatData:
 
     # 4. Difference averaging
 
-    def getDiffAverages(self, weightedAveraging=False, fraction=0.9, chisqThresh=1.5,
-                        q_break=None, chisqThresh_lowq=1.5, chisqThresh_highq=1.5,
-                        plotting=False, chisqHistMax=10, y_offset=None,
-                        dezinger=True, dezingerThresh=5,
-                        estimateCov=True, useCovShrinkage=True, covShrinkage=None):
+    def getDiffAverages(self, fraction=0.9, chisqThresh=1.5, q_break=None,
+                        dezinger=True, dezingerThresh=5, covShrinkage=0,
+                        plotting=True, chisqHistMax=10, y_offset=None):
         ''' Method to get average differences. It works in the same way as
         getTotalAverages, so refer to the information on input/output in the
         getTotalAverages docstring.
         '''
         print('*** Averaging the difference curves ***')
 
-        if weightedAveraging:
-            weights = 1 / self.total.normInt
-            weights /= np.median(weights)
-            self.diff.covii = self.diff.Adiff @ np.diag(weights) @ self.diff.Adiff.T
-        else:
-            self.diff.covii = self.diff.Adiff @ self.diff.Adiff.T
+        self.diff.covii = self.diff.Adiff @ self.total.covii @ self.diff.Adiff.T
 
         (self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier,
          self.diff.covtt, self.diff.covqq, self.diff.chisq) = \
             getAverage(self.q, self.diff.ds, self.diff.covii,
                        self.diff.isOutlier, self.diff.delay_str, self.t_str, self.diff.toff_str,
-                       fraction, chisqThresh,
-                       q_break, chisqThresh_lowq, chisqThresh_highq,
-                       plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset,
-                       dezinger=dezinger, dezingerThresh=dezingerThresh,
-                       estimateCov=estimateCov, useCovShrinkage=useCovShrinkage,
-                       covShrinkage=covShrinkage)
+                       fraction, chisqThresh, q_break,
+                       dezinger=dezinger, dezingerThresh=dezingerThresh, covShrinkage=covShrinkage,
+                       plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset)
         print('*** Done ***\n')
 
     # 5. Saving
@@ -699,52 +705,52 @@ class ScatData:
         print('*** Saving ***')
         f = h5py.File(savePath, 'w')
 
-        for attr in dir(self):
-            if not (attr.startswith('_') or
-                    attr.startswith('get') or
-                    attr.startswith('save') or
-                    attr.startswith('load') or
-                    attr.startswith('integrate')):
-
-                if ((attr == 'total') or
-                        (attr == 'diff') or
-                        (attr == 'AIGeometry')):
-                    obj = self.__getattribute__(attr)
-                    print('Group:', attr)
-                    for subattr in dir(obj):
-                        if not (subattr.startswith('_') or
-                                subattr.startswith('ai')):
-                            data_to_record = obj.__getattribute__(subattr)
-                            #                            print(data_to_record)
-                            if not ((type(data_to_record) == int) or
-                                    (type(data_to_record) == float)):
-                                if ((type(data_to_record) == str) or
-                                        (type(data_to_record[0]) == str)):
-                                    data_to_record = '|'.join([i for i in data_to_record])
-
-                            if not sparse.issparse(data_to_record):
-                                f.create_dataset(attr + '/' + subattr, data=data_to_record)
-                                print('\t' + subattr, 'saved')
-
-                elif attr == 'logData':
-                    self.logData.to_hdf(savePath, key='logData', mode='r+')
-                    print(attr, 'saved')
-
-                else:
-                    data_to_record = self.__getattribute__(attr)
-                    if not ((type(data_to_record) == int) or
-                            (type(data_to_record) == float)):
-                        if ((type(data_to_record) == str) or
-                                (type(data_to_record[0]) == str)):
-                            data_to_record = '|'.join([i for i in data_to_record])
-                    f.create_dataset(attr, data=data_to_record)
-                    print(attr, 'saved')
+        self._save_group(savePath, f, self.__dict__)
+        self._save_group(savePath, f, self.AIGeometry.__dict__, indent='\t', group='AIGeometry')
+        self._save_group(savePath, f, self.total.__dict__, indent='\t', group='total')
+        self._save_group(savePath, f, self.diff.__dict__, indent='\t', group='diff')
 
         f.close()
 
-        print('*** Done ***\n')
 
-    def load(self, loadPath):
+    def _save_group(self, savepath, f, dict, indent='', group=None):
+        if group:
+            print('Saving the following group:', group)
+            fpath = group + '/'
+        else:
+            print('Saving following attributes')
+            fpath = ''
+
+        for key in dict.keys():
+            if ((type(dict[key]) == DataContainer)
+                    or (key == 'ai')
+                    or (key == 'Adiff')):
+                continue
+
+            print(indent, key, '\t', end=' ')
+
+            if type(dict[key]) == pd.core.frame.DataFrame:
+                try:
+                    dict[key].to_hdf(savepath, key='logData', mode='r+')
+                    print('success')
+                except:
+                    'failed'
+            else:
+                try:
+                    if ((type(dict[key]) == list)
+                        or ((type(dict[key]) == np.ndarray) and (type(dict[key][0]) == str))):
+                        data = '|'.join(dict[key])
+                    else:
+                        data = dict[key]
+                    f.create_dataset(fpath + key, data=data)
+
+                    print('success')
+                except:
+                    print('failed')
+
+
+
+    def initializeFromH5(self, loadPath):
 
         assert isinstance(loadPath, str), \
             'Provide data output directory as a string'
@@ -791,52 +797,6 @@ class ScatData:
 # contexts and such implementation simplifies access to them.
 
 
-class DataContainer:
-    # dummy class to store the data
-    def __init__(self):
-        pass
-
-
-def _get_id09_columns_old():
-    return ['date', 'time', 'file',
-            'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max',
-            'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
-            'xray', 'xray_std', 'xray_min', 'xray_max', 'xray_n',
-            'n_pulses']
-
-
-def _get_id09_columns():
-    return ['date', 'time', 'file',
-            'delay', 'delay_act', 'delay_act_std', 'delay_act_min', 'delay_act_max', 'delay_n',
-            'laser', 'laser_std', 'laser_min', 'laser_max', 'laser_n',
-            'xray', 'xray_std', 'xray_min', 'xray_max', 'xray_n',
-            'n_pulses']
-
-
-def medianDezinger(img_orig, mask):
-    ''' Function for image dezingering.
-    
-    You need:
-        img_orig - the image you want to dezinger
-        mask - the mask for this image (can be None)
-    
-    Output:
-        img - dezingered image
-    '''
-    img = img_orig.copy()
-    img_blur = median_filter(img, size=(3, 3))
-    img_diff = (img.astype(float) - img_blur.astype(float))
-    if ~mask:
-        threshold = np.std(img_diff[mask.astype(bool)]) * 10
-        hot_pixels = np.abs(img_diff) > threshold
-        hot_pixels[mask.astype(bool)] = 0
-    else:
-        threshold = np.std(img_diff) * 10
-        hot_pixels = np.abs(img_diff) > threshold
-    img[hot_pixels] = img_blur[hot_pixels]
-    return img
-
-
 def medianDezinger1d(x_orig, fraction=0.9, kernel_size=5, thresh=5):
     ''' Function for dezingering 1D curves using median filter.
     
@@ -867,88 +827,6 @@ def normalizeQ(q, s_raw, qNormRange):
     qNormRangeSel = (q >= qNormRange[0]) & (q <= qNormRange[1])
     normInt = np.trapz(s_raw[qNormRangeSel, :], q[qNormRangeSel], axis=0)
     return normInt, s_raw / normInt
-
-
-def time_str2num(t_str):
-    ''' Function for converting time delay strings to numerical format (in s)
-        Input: time delay string
-        Output: time in s
-    '''
-    try:
-        t = float(t_str)
-    except ValueError:
-        t_number = float(t_str[0:-2])
-        if 'ps' in t_str:
-            t = t_number * 1e-12
-        elif 'ns' in t_str:
-            t = t_number * 1e-9
-        elif 'us' in t_str:
-            t = t_number * 1e-6
-        elif 'ms' in t_str:
-            t = t_number * 1e-3
-    return t
-
-
-def time_num2str(t):
-    ''' Function for converting time delays to string format
-        Input: time delay in s
-        Output: time string
-    '''
-
-    def convertToString(t, factor):
-        t_r0 = round(t * factor)
-        t_r3 = round(t * factor, 3)
-        if t_r3 == t_r0:
-            return str(int(t_r0))
-        else:
-            return str(t_r3)
-
-    if t == 0: return '0'
-    A = np.log10(np.abs(t))
-    if (A < -12):
-        t_str = convertToString(t, 1e15) + 'fs'
-    elif (A >= -12) and (A < -9):
-        t_str = convertToString(t, 1e12) + 'ps'
-    elif (A >= -9) and (A < -6):
-        t_str = convertToString(t, 1e9) + 'ns'
-    elif (A >= -6) and (A < -3):
-        t_str = convertToString(t, 1e6) + 'us'
-    elif (A >= -3) and (A < 0):
-        t_str = convertToString(t, 1e3) + 'ms'
-    else:
-        t_str = str(round(t, 3))
-    return t_str
-
-
-def getWeights(timeStamp, offsTBS, mapDiff):
-    ''' Function which calculates weights for the next and previous reference
-    curves.
-    
-    If the given curve is measured at time t_k, the previous reference
-    curve is measured at t_i, and the next is measured at t_j, then the weight
-    for the *previous* is abs(t_k-t_j)/abs(t_i-t_j) while for the *next* one
-    the weight is abs(t_k-t_i)/abs(t_i-t_j). This way the largest weight is 
-    given to the reference curve that is closer in time to the k-th curve.
-    '''
-    for i, stampOn in enumerate(timeStamp):
-        offsTBS_loc = offsTBS[i, :]
-        stampOffs = timeStamp[offsTBS_loc]
-        stampRange = np.diff(stampOffs)
-        if stampRange.size == 0:
-            mapDiff[i, offsTBS_loc] = -1
-        elif stampRange.size == 1:
-            stampDiffs = abs(stampOn - stampOffs)
-            weights = -(stampDiffs / stampRange)[::-1]
-            mapDiff[i, offsTBS_loc] = weights
-        else:
-            print('Cannot compute difference for', i, 'curve')
-            print('diagnostics: i:', i, '; stampOn:', stampOn,
-                  '; stampOffs:', stampOffs,
-                  '; stampDiffs:', abs(stampOn - stampOffs),
-                  '; offs TBS: ', np.where(offsTBS_loc))
-            raise ValueError('Variable stampThresh is too large. '
-                             'Decrease the multiplication factor.')
-    return mapDiff
 
 
 def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
@@ -982,7 +860,7 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
     # Amean is defined such that x_mean @ Amean = X
     Amean = np.zeros((t_str.size, delay_str.size))
 
-    print('Identifying outliers ... ');
+    print('Identifying outliers ... ')
     outlierStartTime = time.perf_counter()
 
     for i, delay_point in enumerate(t_str):
@@ -1140,7 +1018,7 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
         plt.plot(q, x_av_loc - y_offset_i, 'r-')
         # print(np.sum(~isOutlier_loc), isOutlier_loc)
         msg = f'{each_t}\n{np.sum(~isOutlier_loc)}/{len(isOutlier_loc)}'
-        plt.text(q.min() + (q.max()-q.min())*0.75, y_offset*0.5 - y_offset_i, msg, va='center', ha='center',
+        plt.text(q.min() + (q.max()-q.min())*0.75, y_offset*0.25 - y_offset_i, msg, va='center', ha='center',
                  backgroundcolor='w')
 
     plt.hlines(-np.arange(chisqThresh.size) * y_offset, q.min(), q.max())
@@ -1180,35 +1058,37 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
     tth_new = np.tan(r / dist_new)
     return 4 * pi / wavelength * np.sin(tth_new / 2)
 
-
-# %%
 if __name__ == '__main__':
-    # Dirty Checking: integration
     A = ScatData(r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run1\diagnostics.log',
                  logFileStyle='id09_old',
                  nFirstFiles=25)
 
     # %%
-    A.integrate(energy = 25.2,
-                distance = 44.75,
-                pixelSize = 0.000104388,
-                centerX = 469.25,
-                centerY = 599.5,
-                qRange = [0.39, 12.01],
-                nqpt = 465,
-                qNormRange = [5.00, 10.00],
-                maskPath = r"C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\ru=co_mask.edf",
+    A.integrate(energy=25.2,
+                distance=44.75,
+                pixelSize=0.000104388,
+                centerX=469.25,
+                centerY=599.5,
+                qRange=[0.39, 12.01],
+                nqpt=465,
+                qNormRange=[5.00, 10.00],
+                maskPath=r"C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\ru=co_mask.edf",
                 correctPhosphor=True, muphos=92.8, lphos=75e-4,
                 correctSample=True, musample=0.29, lsample=300e-4,
                 plotting=True)
     # %% idnetify outliers in total curves
-    A.getTotalAverages(fraction=0.9, chisqThresh=[6,4], q_break=5)
-#
-#    # %% difference calculation
-#    A.getDifferences(toff_str='-5us',
-#                     subtractFlag='MovingAverage')
-#
-#    # %%
-#
-#    #    A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
-#    A.getDiffAverages(fraction=0.9, q_break=2, chisqThresh_lowq=2.5, chisqThresh_highq=3)
+    A.getTotalAverages(fraction=0.9, chisqThresh=[6, 4], q_break=5, plotting=False)
+    #
+    # %% difference calculation
+    A.getDifferences(toff_str='-3ns',
+                     subtractFlag='MovingAverage')
+
+    # %%
+
+    #    A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
+    A.getDiffAverages(fraction=0.9, chisqThresh=3, plotting=False)
+
+    # %%
+
+    A.save(r'C:\pyfiles\pytrx_testing\bla.h5')
+#    B = ScatData(r'C:\pyfiles\pytrx_testing\bla.h5')
