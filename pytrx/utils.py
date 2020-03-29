@@ -7,6 +7,8 @@ Created on Wed Mar 25 21:10:16 2020
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.linalg import solveh_banded
+
 
 
 class DataContainer:
@@ -80,4 +82,34 @@ def time_num2str(t):
     else:
         t_str = str(round(t, 3))
     return t_str
+
+
+def convert_banded(x):
+    n, m = x.shape
+    assert n == m, 'matrix must be squared'
+
+    #    d = np.diag(x)
+    diags = []
+    for i in range(n):
+        read = np.diag(x, i)
+        if not np.all(read == 0):
+            diags.append(read)
+        else:
+            break
+
+    n_diags = len(diags)
+    out = np.zeros((n_diags, n))
+
+    for i in range(0, n_diags):
+        d = diags[i]
+        idx = d.size
+        out[i, :idx] = d
+
+    return out, n
+
+
+def invert_banded(x):
+    x_conv, n = convert_banded(x)
+    x_inv = solveh_banded(x_conv, np.eye(n), lower=True)
+    return x_inv
 

@@ -593,11 +593,6 @@ class ScatData:
         self.diff = DataContainer()
         assert toff_str in self.total.delay_str, 'toff_str is not found among recorded time delays'
         self.diff.toff_str = toff_str
-        self.diff.ds = np.zeros((self.q.size, self.nFiles))
-        self.diff.delay = np.array([])
-        self.diff.delay_str = np.array([])
-        self.diff.timeStamp = np.array([])
-        self.diff.timeStamp_str = np.array([])
 
         self.diff.Adiff = sparse.eye(self.nFiles).tolil()
 
@@ -649,7 +644,7 @@ class ScatData:
                     self.diff.Adiff[i, idx_prev] = -1
 
         self.diff.ds = (self.diff.Adiff @ self.total.s.T).T
-
+        self.diff.covii = self.diff.Adiff @ self.total.covii @ self.diff.Adiff.T
         self.diff.delay = self.total.delay
         self.diff.delay_str = self.total.delay_str
         self.diff.timeStamp = self.total.timeStamp
@@ -686,8 +681,6 @@ class ScatData:
         getTotalAverages docstring.
         '''
         print('*** Averaging the difference curves ***')
-
-        self.diff.covii = self.diff.Adiff @ self.total.covii @ self.diff.Adiff.T
 
         (self.diff.ds_av, self.diff.ds_err, self.diff.isOutlier,
          self.diff.covtt, self.diff.covqq, self.diff.chisq) = \
@@ -854,8 +847,6 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
     if covii is None:
         covii = np.eye(delay_str.size)
 
-    x_av = np.zeros((q.size, t_str.size))
-
     chisqThresh = np.array(chisqThresh)
     if chisqThresh.size>1:
         q_break = np.array(q_break)
@@ -889,11 +880,11 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
             x_loc[isHotPixel_loc] = x_loc_med[isHotPixel_loc]
             x[:, delay_selection] = x_loc
 
-        Amean[i, delay_selection & ~isOutlier] = 1
+        Amean[i, delay_selection] = 1
 
     print('... done ( %3.f' % ((time.perf_counter() - outlierStartTime) * 1000), 'ms )')
 
-    print('Averaging ... ', end='');
+    print('Averaging ... ', end='')
     averageStartTime = time.perf_counter()
 
     if sparse.issparse(covii): covii = covii.toarray()
@@ -1094,9 +1085,9 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
     return 4 * pi / wavelength * np.sin(tth_new / 2)
 
 if __name__ == '__main__':
-    A = ScatData(r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run1\diagnostics.log',
+    A = ScatData(r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run2\diagnostics.log',
                  logFileStyle='id09_old',
-                 nFirstFiles=2000)
+                 nFirstFiles=2500)
 
     # %%
     A.integrate(energy=25.2,
@@ -1121,9 +1112,9 @@ if __name__ == '__main__':
     # %%
 
     #    A.getDiffAverages(fraction=0.9, chisqThresh=2.5)
-    A.getDiffAverages(fraction=0.9, chisqThresh=3, plotting=False)
+    A.getDiffAverages(fraction=0.9, chisqThresh=3, plotting=True)
 
     # %%
 
     A.save(r'C:\pyfiles\pytrx_testing\bla.h5')
-#    B = ScatData(r'C:\pyfiles\pytrx_testing\bla.h5')
+    B = ScatData(r'C:\pyfiles\pytrx_testing\bla.h5')
