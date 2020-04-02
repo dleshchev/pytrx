@@ -113,3 +113,7 @@ def invert_banded(x):
     x_inv = solveh_banded(x_conv, np.eye(n), lower=True)
     return x_inv
 
+def cov2corr(C):
+    d = np.diag(1/np.sqrt(np.diag(C)))
+    return d @ C @ d
+
