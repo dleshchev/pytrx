@@ -30,7 +30,7 @@ import h5py
 import pyFAI
 import fabio
 
-from utils import DataContainer, _get_id09_columns_old, _get_id09_columns, time_str2num, time_num2str, invert_banded
+from pytrx.utils import DataContainer, _get_id09_columns_old, _get_id09_columns, time_str2num, time_num2str, invert_banded
 
 
 from matplotlib.lines import Line2D
@@ -117,8 +117,11 @@ class ScatData:
         unique time delays were measured in a given data set.
 
         '''
-
-        extension = Path(inputFile).suffix
+        if type(inputFile) is str:
+            extension = Path(inputFile).suffix
+        elif type(inputFile) is list:
+            extension = Path(inputFile[0]).suffix
+#            
         if extension == '.log':
             self.initializeLogFile(inputFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir)
         elif extension == '.h5':
@@ -703,6 +706,7 @@ class ScatData:
         self._save_group(savePath, f, self.diff.__dict__, indent='\t', group='diff')
 
         f.close()
+        print('*** Saving finished ***')
 
 
     def _save_group(self, savepath, f, dict, indent='', group=None):
@@ -907,17 +911,6 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
     isOutlier, chisq = identifyOutliers_all(q, x, delay_str, t_str, isOutlier, fraction, chisqThresh, q_break,
                                             dezinger, dezingerThresh)
 
-# # this needs to be refactored ..
-#
-#     x_clean = x[:, ~isOutlier]
-#     covii_clean = covii[np.ix_(~isOutlier, ~isOutlier)]
-#     delay_str_clean = delay_str[~isOutlier]
-#
-#     isOn = delay_str != toff_str
-#     isOn_av = t_str != toff_str
-#     x_clean_isOn = x[:, ~isOutlier & isOn]
-#     covii_clean_isOn = covii[np.ix_(~isOutlier & isOn, ~isOutlier & isOn)]
-
     print('Averaging ... ', end='')
     averageStartTime = time.perf_counter()
 
@@ -1113,7 +1106,7 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
 
     plt.hlines(-np.arange(chisqThresh.size)*y_offset, chisqBins[0], chisqBins[-2])
     plt.xlim(chisqBins[0], chisqBins[-2])
-    plt.ylim(YLIM)
+    plt.ylim(y_offset_i, y_offset)
     plt.ylabel('Occurances')
     plt.xlabel('chisq value')
 
@@ -1149,10 +1142,11 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
     return 4 * pi / wavelength * np.sin(tth_new / 2)
 
 if __name__ == '__main__':
-#    A = ScatData(r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run2\diagnostics.log',
-#                 logFileStyle='id09_old',
-#                 nFirstFiles=2500)
-#
+    A = ScatData([r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run1\diagnostics.log',
+                  r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run2\diagnostics.log'],
+                 logFileStyle='id09_old',
+                 nFirstFiles=2500)
+
 #    # %%
 #    A.integrate(energy=25.2,
 #                distance=44.75,
@@ -1174,8 +1168,8 @@ if __name__ == '__main__':
 #                     subtractFlag='MovingAverage')
 
     # %%
-    A = ScatData(r'C:\pyfiles\pytrx_testing\bla.h5')
-    A.getDiffAverages(fraction=0.9, chisqThresh=2.5, plotting=False, covShrinkage=0.01)
+#    A = ScatData(r'C:\pyfiles\pytrx_testing\bla.h5')
+#    A.getDiffAverages(fraction=0.9, chisqThresh=2.5, plotting=False, covShrinkage=0.01)
 #    A.getDiffAverages(fraction=0.9, chisqThresh=3, plotting=True)
 #
 #    # %%
