@@ -1081,7 +1081,7 @@ def totalScattering(q, mol, atomOnly=False):
 
 
 def Solvent(name_str):
-    if name_str == 'acetonitrile':
+    if name_str in ['acetonitrile', 'Acetonitrile', 'acn', 'MeCN', 'ACN', 'CH3CN', 'ch3cn']:
        Z = np.array(['C', 'C', 'H', 'H', 'H', 'N'])
        xyz = np.array([[  0.000000,    0.000000,    0.006313],
                        [  0.000000,    0.000000,    1.462539],
@@ -1089,7 +1089,7 @@ def Solvent(name_str):
                        [ -0.512291,   -0.887315,   -0.370908],
                        [ -0.512291,    0.887315,   -0.370908],
                        [  0.000000,    0.000000,    2.615205]])
-    elif name_str == 'cyclohexane':
+    elif name_str in ['cyclohexane', 'c6h12', 'C6H12']:
         Z = np.array(['C']*6 + ['H']*12)
         xyz = np.array([[-0.7613, -0.7573,  0.9857],               
                         [ 0.7614, -0.7575,  0.9855],               
@@ -1109,7 +1109,7 @@ def Solvent(name_str):
                         [-1.1329, -0.0768, -1.6251],               
                         [ 1.1290,  0.8924, -2.0303],               
                         [ 1.1300,  1.5904, -0.3493]])
-    elif name_str == 'thf':
+    elif name_str in ['thf', 'THF', 'Tetrahydrofuran', 'tetrahydrofuran']:
         # structure is taken from SI of Cryst. Growth Des., 2015, 15 (3), pp 1073–1081 DOI: 10.1021/cg501228w
         Z = np.array(['O']*1 + ['C']*4 + ['H']*8)
         xyz = np.array([[ 0.000760889, -0.000738525, -1.456851081],
@@ -1125,6 +1125,11 @@ def Solvent(name_str):
                         [ 0.414866234,  1.967002482, -1.058148213],
                         [ 0.850649795,  1.065510448,  1.514996321],
                         [-0.796426720,  1.304515754,  0.911888645]])
+    elif name_str in ['Water', 'water', 'h2o', 'H2O']:
+        Z = np.array(['O'] * 1 + ['H'] * 2)
+        xyz = np.array([[ 0.   ,  0.   ,  0.   ],
+                        [ 0.928,  0.013,  0.246],
+                        [-0.263, -0.899, -0.21 ]])
     else:
         return None
     return Molecule(Z, xyz)

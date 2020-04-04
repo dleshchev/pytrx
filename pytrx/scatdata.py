@@ -38,6 +38,8 @@ custom_lines = [Line2D([0], [0], color='k', lw=1),
                 Line2D([0], [0], color='b', lw=1),
                 Line2D([0], [0], color='r', lw=1)]
 
+ignore_these_fields = ['covii', 'imageAv', 'logData']
+
 
 class ScatData:
     ''' This is a class for processing, storage, and loading of time resolved
@@ -92,7 +94,7 @@ class ScatData:
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
 
-    def __init__(self, inputFile, logFileStyle='biocars', ignoreFirst=False, nFirstFiles=None, dataInDir=None):
+    def __init__(self, inputFile, logFileStyle='biocars', ignoreFirst=False, nFirstFiles=None, dataInDir=None, smallLoad=False):
         '''
         To read the file:
 
@@ -125,7 +127,7 @@ class ScatData:
         if extension == '.log':
             self.initializeLogFile(inputFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir)
         elif extension == '.h5':
-            self.initializeFromH5(inputFile)
+            self.initializeFromH5(inputFile, smallLoad)
 
 
 
@@ -736,7 +738,7 @@ class ScatData:
             else:
                 try:
                     if ((type(dict[key]) == list)
-                        or ((type(dict[key]) == np.ndarray) and (type(dict[key][0]) == str))):
+                        or ((type(dict[key]) == np.ndarray) and ((type(dict[key][0]) == str) or (type(dict[key][0]) == np.str_)))):
                         data = '|'.join(dict[key])
                     else:
                         data = dict[key]
@@ -748,7 +750,7 @@ class ScatData:
 
 
 
-    def initializeFromH5(self, loadPath):
+    def initializeFromH5(self, loadPath, smallLoad):
 
         assert isinstance(loadPath, str), \
             'Provide data output directory as a string'
@@ -759,6 +761,11 @@ class ScatData:
         f = h5py.File(loadPath, 'r')
 
         for key in f.keys():
+
+            if (smallLoad) and (key in ignore_these_fields):
+                print(f'{key} skipped to conserve memory')
+                continue
+
             if type(f[key]) == h5py.Dataset:
                 if type(f[key].value) == str:
                     data_to_load = np.array(f[key].value.split('|'))
@@ -768,12 +775,18 @@ class ScatData:
                 print(key, 'success')
 
             elif (type(f[key]) == h5py.Group) and (key != 'logData'):
+
                 print('Loading group', key)
                 if (key == 'diff') or (key == 'total'):
                     self.__setattr__(key, IntensityContainer())
                 elif key == 'aiGeometry':
                     self.__setattr__(key, AIGeometry())
                 for subkey in f[key]:
+
+                    if (smallLoad) and (subkey in ignore_these_fields):
+                        print('\t', f'{subkey} skipped to conserve memory')
+                        continue
+
                     if type(f[key][subkey].value) == str:
                         data_to_load = np.array(f[key][subkey].value.split('|'))
                     else:
