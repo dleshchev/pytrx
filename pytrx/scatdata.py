@@ -786,7 +786,7 @@ class ScatData:
                     if (smallLoad) and (subkey in ignore_these_fields):
                         print('\t', f'{subkey} skipped to conserve memory')
                         continue
-
+                    # print(type(f[key][subkey].value))  #################################
                     if type(f[key][subkey].value) == str:
                         data_to_load = np.array(f[key][subkey].value.split('|'))
                     else:
@@ -856,6 +856,12 @@ class IntensityContainer:
         self.timeStamp = timeStamp
         self.timeStamp_str = timeStamp_str
         self.scanStamp = scanStamp
+
+    def scale_by(self, scale):
+        self.s *= scale
+        self.s_av *= scale
+        self.s_err *= scale
+        self.covqq *= scale ** 2
 
 
 # %% Auxillary functions
