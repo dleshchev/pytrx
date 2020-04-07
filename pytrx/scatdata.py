@@ -766,6 +766,8 @@ class ScatData:
                 print(f'{key} skipped to conserve memory')
                 continue
 
+            print(type(f[key].value))  #################################
+
             if type(f[key]) == h5py.Dataset:
                 if type(f[key].value) == str:
                     data_to_load = np.array(f[key].value.split('|'))
@@ -786,7 +788,8 @@ class ScatData:
                     if (smallLoad) and (subkey in ignore_these_fields):
                         print('\t', f'{subkey} skipped to conserve memory')
                         continue
-                    # print(type(f[key][subkey].value))  #################################
+
+                    print(type(f[key][subkey]))  #################################
                     if type(f[key][subkey].value) == str:
                         data_to_load = np.array(f[key][subkey].value.split('|'))
                     else:
@@ -796,7 +799,7 @@ class ScatData:
 
             elif (key == 'logData'):
                 self.logData = pd.read_hdf(loadPath, key=key)
-                print(key, 'loaded')
+                print(key, 'success')
 
         f.close()
 
