@@ -3,7 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
-from pytrx import scatsim
+from pytrx import scatsim, hydro
 
 class ScatAna(ScatData):
 
@@ -24,3 +24,9 @@ class ScatAna(ScatData):
         self.diff.scale_by(scale)
 
 
+    def solvent_per_solute(self, solvent, concentration):
+        data_solv = hydro.data[solvent]
+        return data_solv.density / data_solv.molar_mass / concentration
+
+
+    def 
