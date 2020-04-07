@@ -8,7 +8,7 @@ from pytrx import scatsim, hydro
 class SmallMoleculeProject:
 
     def __init__(self, input_data, **kwargs):
-        self.data = ScatData(input_data)
+        self.data = ScatData(input_data, smallLoad=True)
         self.metadata = Metadata(**kwargs)
 
 

@@ -10,7 +10,7 @@ from itertools import islice
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
+from pytrx.utils import z_str2num, z_num2str
 import pkg_resources
 
 from pytrx import hydro
@@ -366,63 +366,63 @@ def Solvent(name_str):
 
 
 
-if __name__ == '__main__':
-    np.random.seed(100)
-    import timeit
-    
-#    Z = np.array(['I', 'I', 'I', 'Br'])
-#    
-#    xyz = np.array([[0.00, 0.0, 0.0],
-#                    [2.67, 0.0, 0.0],
-#                    [6.67, 0.0, 0.0],
-#                    [0.00, 3.0, 0.0]])
-#    
-#    Z = np.array(['I', 'I', 'Br'])
-#    
-#    xyz = np.array([[0.00, 0.0, 0.0],
-#                    [2.67, 0.0, 0.0],
-#                    [6.67, 0.0, 0.0]])
-
-#    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.01)    
-#    fname1 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-LS-opt-PBE-TZVP-COSMO.xyz'
-#    fname2 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-HS-opt-PBE-TZVP-COSMO.xyz'
-    
-    fname1 = r"D:\lcls_dec2018\UserScripts\structures\pt2g4\pt2g24_singlet_b3lyp.xyz"
-    fname2 = r"D:\lcls_dec2018\UserScripts\structures\pt2g4\pt2g24_triplet_b3lyp.xyz"
-
-    mol1 = fromXYZ(fname1)
-    mol2 = fromXYZ(fname2)
-    
-    n_mol=100
-    ens1 = Ensemble(mol1, n_mol=n_mol)
-    ens1.perturb(0.1)
-    ens1.calcGR(dr=0.01)
-    
-    ens2 = Ensemble(mol2, n_mol=n_mol)
-    ens2.perturb(0.1)
-    ens2.calcGR(dr=0.01)
-    
-    ens1.calcStructDeviation()
-    
-    
-    q = np.linspace(3, 12, 901)
-    ff = formFactor(q, ens1.Z)
-    
-    DebyeFromGR(q, ens1.gr, f=ff)
-    
-    
-    plt.figure(1)
-    plt.clf()
-    plt.subplot(211)
-    plt.plot(ens1.r, ens1.gr[('Co','N')])
-    plt.plot(ens2.r, ens2.gr[('Co','N')])
-    
-    
- 
-    plt.subplot(212)
- 
-    plt.plot(q, (Debye(q, mol2) - Debye(q, mol1)), '.-')
-    plt.plot(q, 1/n_mol*(DebyeFromGR(q, ens2.gr) - DebyeFromGR(q, ens1.gr)))
-    
+# if __name__ == '__main__':
+#     np.random.seed(100)
+#     import timeit
+#
+# #    Z = np.array(['I', 'I', 'I', 'Br'])
+# #
+# #    xyz = np.array([[0.00, 0.0, 0.0],
+# #                    [2.67, 0.0, 0.0],
+# #                    [6.67, 0.0, 0.0],
+# #                    [0.00, 3.0, 0.0]])
+# #
+# #    Z = np.array(['I', 'I', 'Br'])
+# #
+# #    xyz = np.array([[0.00, 0.0, 0.0],
+# #                    [2.67, 0.0, 0.0],
+# #                    [6.67, 0.0, 0.0]])
+#
+# #    mol1 = Molecule(Z, xyz, calc_gr=True, dr=0.01)
+# #    fname1 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-LS-opt-PBE-TZVP-COSMO.xyz'
+# #    fname2 = r'C:\work\Experiments\2015\Ru_Dimers\Theory\Ru=Co\DFT\RuCo-HS-opt-PBE-TZVP-COSMO.xyz'
+#
+#     fname1 = r"D:\lcls_dec2018\UserScripts\structures\pt2g4\pt2g24_singlet_b3lyp.xyz"
+#     fname2 = r"D:\lcls_dec2018\UserScripts\structures\pt2g4\pt2g24_triplet_b3lyp.xyz"
+#
+#     mol1 = fromXYZ(fname1)
+#     mol2 = fromXYZ(fname2)
+#
+#     n_mol=100
+#     ens1 = Ensemble(mol1, n_mol=n_mol)
+#     ens1.perturb(0.1)
+#     ens1.calcGR(dr=0.01)
+#
+#     ens2 = Ensemble(mol2, n_mol=n_mol)
+#     ens2.perturb(0.1)
+#     ens2.calcGR(dr=0.01)
+#
+#     ens1.calcStructDeviation()
+#
+#
+#     q = np.linspace(3, 12, 901)
+#     ff = formFactor(q, ens1.Z)
+#
+#     DebyeFromGR(q, ens1.gr, f=ff)
+#
+#
+#     plt.figure(1)
+#     plt.clf()
+#     plt.subplot(211)
+#     plt.plot(ens1.r, ens1.gr[('Co','N')])
+#     plt.plot(ens2.r, ens2.gr[('Co','N')])
+#
+#
+#
+#     plt.subplot(212)
+#
+#     plt.plot(q, (Debye(q, mol2) - Debye(q, mol1)), '.-')
+#     plt.plot(q, 1/n_mol*(DebyeFromGR(q, ens2.gr) - DebyeFromGR(q, ens1.gr)))
+#
     
     
