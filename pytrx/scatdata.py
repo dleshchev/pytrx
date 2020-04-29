@@ -766,7 +766,7 @@ class ScatData:
                 print(f'{key} skipped to conserve memory')
                 continue
 
-            print(type(f[key].value))  #################################
+            # print(type(f[key].value))  #################################
 
             if type(f[key]) == h5py.Dataset:
                 if type(f[key].value) == str:
@@ -789,7 +789,7 @@ class ScatData:
                         print('\t', f'{subkey} skipped to conserve memory')
                         continue
 
-                    print(type(f[key][subkey]))  #################################
+                    # print(type(f[key][subkey]))  #################################
                     if type(f[key][subkey].value) == str:
                         data_to_load = np.array(f[key][subkey].value.split('|'))
                     else:
