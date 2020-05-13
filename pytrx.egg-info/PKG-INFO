@@ -1,0 +1,24 @@
+Metadata-Version: 1.0
+Name: pytrx
+Version: 0.1.0
+Summary: toolbox for analysis of time-resolved x-ray experiments
+Home-page: https://github.com/dleshchev/pytrx
+Author: Denis Leshchev
+Author-email: leshchev.denis@gmail.com
+License: LICENSE.txt
+Description: pytrx
+        ==============
+        
+        Python toolbox for time resolved x-ray experiments. This is a wrap up of some of
+        our (Chen Lab) experience with time-resolved x-ray experiments performed at
+        BioCARS at APS. Currently it is primarily focused on the analysis of x-ray experiments.
+        
+        The library contains following modules:
+        scatdata.py - toolbox for reduction, storage and loading of scattering data (**in
+        progress**)
+        scatana.py - toolbox for analysis of reduced data (**to be added**)
+        scatsim.py - toolbox for generation of scattering profiles from known structures
+        (**in progress**)
+        
+        
+Platform: UNKNOWN
