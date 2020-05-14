@@ -813,7 +813,7 @@ class ScatData:
         print('*** Loading finished ***')
 
 
-    def initalizeEmpty(self):
+    def initializeEmpty(self):
         self.q = None
         self.tth = None
         self.t = None
