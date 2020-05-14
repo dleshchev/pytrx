@@ -119,6 +119,7 @@ class ScatData:
         unique time delays were measured in a given data set.
 
         '''
+        extension = None
         if type(inputFile) is str:
             extension = Path(inputFile).suffix
         elif type(inputFile) is list:
@@ -128,6 +129,9 @@ class ScatData:
             self.initializeLogFile(inputFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir)
         elif extension == '.h5':
             self.initializeFromH5(inputFile, smallLoad)
+
+        if inputFile is None:
+            self.initalizeEmpty()
 
 
 
@@ -809,6 +813,23 @@ class ScatData:
         print('*** Loading finished ***')
 
 
+    def initalizeEmpty(self):
+        self.q = None
+        self.tth = None
+        self.t = None
+        self.t_str = None
+        self.dataInDir = None
+        self.ignoreFirst = None
+        self.imageAv = None
+        self.logFile = None
+        self.logFileStyle = None
+        self.nDelays = None
+        self.nFiles = None
+        self.aiGeometry = AIGeometry()
+        self.diff = IntensityContainer()
+        self.total = IntensityContainer()
+
+
 class AIGeometry:
     def __init__(self, energy=None, distance=None, pixelSize=None, centerX=None, centerY=None, qRange=None, nqpt=None,
                  qNormRange=None):
@@ -964,7 +985,7 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
     dxdxt = dx @ dx.T
     dxdxt_diag = np.diag(np.diag(dxdxt))
 
-    covqq = (dxdxt * (1 - covShrinkage) + dxdxt_diag * covShrinkage) / (dx.shape[1] - t_str.size + 1)
+    covqq = (dxdxt * (1 - covShrinkage) + dxdxt_diag * covShrinkage) / (dx.shape[1] - t_str.size)
 
     x_err = np.sqrt(np.diag(covqq)[:, None] * np.diag(covtt)[None, :])
 
