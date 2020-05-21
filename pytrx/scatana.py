@@ -20,9 +20,9 @@ from pytrx import scatsim, hydro
 #   - * write Solvent Class - TBD
 #   - * write fitting routines (regressors) - WLS, GLS, and TLS
 
-class VibratingMolecule(Molecule):
-    def __init__(self):
-        super.__init__()
+# class VibratingMolecule(Molecule):
+#     def __init__(self):
+#         super.__init__()
 
 
 class SmallMoleculeProject:
