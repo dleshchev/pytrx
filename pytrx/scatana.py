@@ -8,9 +8,9 @@ from pytrx import scatsim, hydro
 
 ## TODO:
 #   - MINOR
-#   - we need to access both isotroptic (ds0) and anisotropic (ds2) parts of scattering, so we need to create corresponding fields in IntensityContainer
-#   - it would be great to figure out with ds vs s
-#   - move ZXYZ data from scatsim.py to hydro.py by expanding the hydroproperties class
+#   - we need to access both isotroptic (ds0) and anisotropic (ds2) parts of scattering, so we need to create corresponding fields in IntensityContainer. ds (s) must remain there
+#   - it would be great to figure out with ds vs s pointers
+#   - move ZXYZ data from scatsim.py to hydro.py by expanding the hydroproperties class. scatsim.Solvent should still be used to calculate scattering (may be more descriptive name could be applied)
 #   - MAJOR
 #   - * write Solute class as interface for structural optimization (currently it can accept 2 xyz files for ES and GS),
 #   - the goal for Solute is to generate a function that computes Debye difference as a function of some parameters, where number of parameters goes from 0 (None) to whatever
@@ -29,7 +29,6 @@ class SmallMoleculeProject:
 
     def __init__(self, input_data, **kwargs):
         '''
-
         Args:
             input_data - .h5 file created using ScatData.save method
             **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
