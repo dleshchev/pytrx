@@ -29,6 +29,7 @@ import h5py
 
 import pyFAI
 import fabio
+import scipy.io
 
 from pytrx.utils import DataContainer, _get_id09_columns_old, _get_id09_columns, time_str2num, time_num2str, invert_banded
 
@@ -1183,6 +1184,28 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
     r = np.arctan(tth_old) * dist_old
     tth_new = np.tan(r / dist_new)
     return 4 * pi / wavelength * np.sin(tth_new / 2)
+
+
+
+
+def distribute_Mat2ScatData(matfile):
+    data = ScatData(None)
+    matdata = scipy.io.loadmat(matfile)
+    data.q = matdata['data']['q'][0][0].squeeze()
+    data.t = matdata['data']['t'][0][0].squeeze()
+    data.t_str = np.array([time_num2str(i) for i in data.t])
+    data.diff.s = matdata['data']['ds0'][0][0]
+    data.diff.covqq = matdata['data']['ds0_covqq'][0][0]
+    data.diff.covtt = matdata['data']['covtt'][0][0]
+    data.total.s_av = np.mean(matdata['data']['soff'][0][0], 1)
+
+
+
+
+
+
+
+
 
 if __name__ == '__main__':
     A = ScatData([r'C:\work\Experiments\2015\Ru-Rh\Ru=Co_data\Ru_Co_rigid_25kev\run1\diagnostics.log',

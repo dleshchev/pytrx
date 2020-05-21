@@ -8,11 +8,22 @@ from pytrx import scatsim, hydro
 class SmallMoleculeProject:
 
     def __init__(self, input_data, **kwargs):
-        self.data = ScatData(input_data, smallLoad=True)
+        '''
+
+        Args:
+            input_data - .h5 file created using ScatData.save method
+            **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
+        '''
+
+        if type(input_data) == str:
+            self.data = ScatData(input_data, smallLoad=True)
+        elif type(input_data) == ScatData:
+            self.data = input_data
+
         self.metadata = Metadata(**kwargs)
 
 
-    def scale(self, qNormRange=None, plotting=True, fig=None):
+    def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
 
         if qNormRange is None:
             qNormRange = self.data.aiGeometry.qNormRange
@@ -22,7 +33,8 @@ class SmallMoleculeProject:
 
         q = self.data.q
         q_sel = (q >= qNormRange[0]) & (q <= qNormRange[1])
-        idx_off = self.data.t_str == self.data.diff.toff_str
+        if idx_off is None:
+            idx_off = self.data.t_str == self.data.diff.toff_str
         s_off = self.data.total.s_av[:, idx_off]
 
         scale = np.trapz(s_th[q_sel], q[q_sel]) / np.trapz(s_off[q_sel, 0], q[q_sel])
