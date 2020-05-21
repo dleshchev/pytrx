@@ -5,6 +5,26 @@ import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
 
+
+## TODO:
+#   - MINOR
+#   - we need to access both isotroptic (ds0) and anisotropic (ds2) parts of scattering, so we need to create corresponding fields in IntensityContainer
+#   - it would be great to figure out with ds vs s
+#   - move ZXYZ data from scatsim.py to hydro.py by expanding the hydroproperties class
+#   - MAJOR
+#   - * write Solute class as interface for structural optimization (currently it can accept 2 xyz files for ES and GS),
+#   - the goal for Solute is to generate a function that computes Debye difference as a function of some parameters, where number of parameters goes from 0 (None) to whatever
+#   - it should be able to accept filepath (str), Molecule instance, VibratingMolecule (may be)
+#   - Solute output (or method, attribute, it should return) -  f(q, parameters), this f is the difference signal S_es(q,some_parameters) - S_gs(q, some_other_parameters), parameters should be ablot to be 0 or None
+#   - * write Cage class - accept dense girdded q, ds, and covariance (emphasize in Q space) OR accept diff_gr (TBD)
+#   - * write Solvent Class - TBD
+#   - * write fitting routines (regressors) - WLS, GLS, and TLS
+
+class VibratingMolecule(Molecule):
+    def __init__(self):
+        super.__init__()
+
+
 class SmallMoleculeProject:
 
     def __init__(self, input_data, **kwargs):
@@ -14,10 +34,11 @@ class SmallMoleculeProject:
             input_data - .h5 file created using ScatData.save method
             **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
         '''
-
+        print(type(input_data), type(input_data) == ScatData)
         if type(input_data) == str:
             self.data = ScatData(input_data, smallLoad=True)
         elif type(input_data) == ScatData:
+            print('i see you')
             self.data = input_data
 
         self.metadata = Metadata(**kwargs)
@@ -35,9 +56,9 @@ class SmallMoleculeProject:
         q_sel = (q >= qNormRange[0]) & (q <= qNormRange[1])
         if idx_off is None:
             idx_off = self.data.t_str == self.data.diff.toff_str
-        s_off = self.data.total.s_av[:, idx_off]
+        s_off = self.data.total.s_av[:, idx_off].copy()
 
-        scale = np.trapz(s_th[q_sel], q[q_sel]) / np.trapz(s_off[q_sel, 0], q[q_sel])
+        scale = np.trapz(s_th[q_sel], q[q_sel]) / np.trapz(s_off[q_sel], q[q_sel])
 
         self.data.total.scale_by(scale)
         self.data.diff.scale_by(scale)
@@ -121,7 +142,7 @@ class Solute:
         self.label=label
         self.xyz_gs = xyz_gs
         self.xyz_es = xyz_es
-        self.mol_gs = scatsim.fromXYZ(xyz_gs)
+        self.mol_gs = scatsim.fromXYZ(xyz_gs) # create Molecule class
         self.mol_es = scatsim.fromXYZ(xyz_es)
 
 

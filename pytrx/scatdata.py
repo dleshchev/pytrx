@@ -132,7 +132,7 @@ class ScatData:
             self.initializeFromH5(inputFile, smallLoad)
 
         if inputFile is None:
-            self.initalizeEmpty()
+            self.initializeEmpty()
 
 
 
@@ -867,7 +867,9 @@ class IntensityContainer:
                  timeStamp=None, timeStamp_str=None, scanStamp=None):
         self.s_raw = s_raw
         self.s = s
+        # self.ds = self.s
         self.s_av = s_av
+        # self.ds_av = self.s_av
         self.s_err = s_err
         self.normInt = normInt
         self.covii = covii
@@ -883,10 +885,10 @@ class IntensityContainer:
         self.scanStamp = scanStamp
 
     def scale_by(self, scale):
-        self.s *= scale
-        self.s_av *= scale
-        self.s_err *= scale
-        self.covqq *= scale ** 2
+        if self.s is not None: self.s *= scale
+        if self.s_av is not None: self.s_av *= scale
+        if self.s_err is not None: self.s_err *= scale
+        if self.covqq is not None: self.covqq *= scale ** 2
 
 
 # %% Auxillary functions
@@ -1197,7 +1199,8 @@ def distribute_Mat2ScatData(matfile):
     data.diff.s = matdata['data']['ds0'][0][0]
     data.diff.covqq = matdata['data']['ds0_covqq'][0][0]
     data.diff.covtt = matdata['data']['covtt'][0][0]
-    data.total.s_av = np.mean(matdata['data']['soff'][0][0], 1)
+    data.total.s_av = np.mean(matdata['data']['soff'][0][0], 1)[:, None]
+    return data
 
 
 
