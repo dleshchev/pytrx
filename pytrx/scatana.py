@@ -33,11 +33,11 @@ class SmallMoleculeProject:
             input_data - .h5 file created using ScatData.save method
             **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
         '''
-        print(type(input_data), type(input_data) == ScatData)
+        #print(type(input_data), type(input_data) == ScatData)
         if type(input_data) == str:
             self.data = ScatData(input_data, smallLoad=True)
         elif type(input_data) == ScatData:
-            print('i see you')
+            #print('i see you')
             self.data = input_data
 
         self.metadata = Metadata(**kwargs)
