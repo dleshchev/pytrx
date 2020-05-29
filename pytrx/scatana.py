@@ -33,20 +33,32 @@ class SmallMoleculeProject:
             input_data - .h5 file created using ScatData.save method
             **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
         '''
-        print(type(input_data), type(input_data) == ScatData)
+        #print(type(input_data), type(input_data) == ScatData)
         if type(input_data) == str:
             self.data = ScatData(input_data, smallLoad=True)
         elif type(input_data) == ScatData:
-            print('i see you')
+            print('Inputting ScatData data')
             self.data = input_data
 
         self.metadata = Metadata(**kwargs)
 
 
     def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
+        '''
 
+        Args:
+            qNormRange: Two element list such as [2.1 4.1]
+            plotting: Flag, T/F
+            fig: figure number for plotting
+            idx_off: n where the n-th curve is used as the laser-off curve
+
+        Returns:
+
+        '''
         if qNormRange is None:
             qNormRange = self.data.aiGeometry.qNormRange
+
+        assert (self.metadata.solvent is not None), 'Solvent in metadata not specified.'
 
         solvent = self.metadata.solvent
         s_th = scatsim.totalScattering(self.data.q, scatsim.Solvent(solvent))
@@ -87,6 +99,11 @@ class SmallMoleculeProject:
         concentration = self.metadata.concentration
         data = hydro.data[solvent]
         return data.density / data.molar_mass / concentration
+
+
+
+
+
 
 
 class Metadata:
@@ -133,7 +150,7 @@ class Metadata:
 class Solute:
 
     def __init__(self, xyz_gs=None, xyz_es=None, label=None):
-        self.label=label
+        self.label = label
         self.xyz_gs = xyz_gs
         self.xyz_es = xyz_es
         self.mol_gs = scatsim.fromXYZ(xyz_gs) # create Molecule class
