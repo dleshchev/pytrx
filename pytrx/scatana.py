@@ -19,6 +19,13 @@ from pytrx import scatsim, hydro
 #   - * write Cage class - accept dense girdded q, ds, and covariance (emphasize in Q space) OR accept diff_gr (TBD)
 #   - * write Solvent Class - TBD
 #   - * write fitting routines (regressors) - WLS, GLS, and TLS
+#   - More thoughts on Solute class:
+#   - user somehow comes up with a function that produces xyz matrix as a function of parameters or (no parameters)
+#   - user packs it into a class that is either Molecule or it is VibratingMolecule (see below) or we can call something else
+#   - the goal of this is to have an instance with two fields: Z and xyz. Then Solute class has method scattering_signal that converts it from xyz(p) to dS(q, p)
+
+
+
 
 # class VibratingMolecule(Molecule):
 #     def __init__(self):
@@ -149,12 +156,27 @@ class Metadata:
 
 class Solute:
 
-    def __init__(self, xyz_gs=None, xyz_es=None, label=None):
+    def __init__(self, input_gs=None, input_es=None, label=None):
+
+        '''
+        input_gs - ground state structure, must be a path to file or Molecule instance or instance based on Molecule class
+        '''
+
         self.label = label
-        self.xyz_gs = xyz_gs
-        self.xyz_es = xyz_es
-        self.mol_gs = scatsim.fromXYZ(xyz_gs) # create Molecule class
-        self.mol_es = scatsim.fromXYZ(xyz_es)
+        self.mol_gs = self.parse_input(input_gs)
+        self.mol_es = self.parse_input(input_es)
+
+    def parse_input(self, input):
+        if type(input) == str:
+            return scatsim.fromXYZ(input)
+        else:
+            return input
+
+    def signal(self, q, *x):
+        # self.mol_es.move(*x) - consider this
+        return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
+
+
 
 
 
