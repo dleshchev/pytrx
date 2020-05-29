@@ -89,11 +89,6 @@ class SmallMoleculeProject:
         return data.density / data.molar_mass / concentration
 
 
-
-
-
-
-
 class Metadata:
 
     def __init__(self, solvent=None, concentration=None,
