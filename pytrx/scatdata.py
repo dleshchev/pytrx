@@ -861,7 +861,7 @@ class AIGeometry:
 
 class IntensityContainer:
     def __init__(self, s_raw=None, s=None, s_av=None, s_err=None,
-                 s2=None, s2_av=None, s2_err=None, # Anisotropy
+                 s2=None, s2_av=None, s2_err=None, # These are anisotropy terms
                  normInt=None, covii=None, covqq=None, covtt=None,
                  chisq=None, isOutlier=None,
                  delay=None, delay_str=None, toff_str=None,
@@ -1190,8 +1190,6 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
     r = np.arctan(tth_old) * dist_old
     tth_new = np.tan(r / dist_new)
     return 4 * pi / wavelength * np.sin(tth_new / 2)
-
-
 
 
 def distribute_Mat2ScatData(matfile):
