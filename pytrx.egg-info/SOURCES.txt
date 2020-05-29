@@ -7,6 +7,8 @@ pytrx/Compton_lowZ.dat
 pytrx/__init__.py
 pytrx/f0_CromerMann.dat
 pytrx/f0_WaasKirf.dat
+pytrx/hydro.py
+pytrx/rmc.py
 pytrx/scatana.py
 pytrx/scatdata.py
 pytrx/scatsim.py
