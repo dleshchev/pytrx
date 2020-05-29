@@ -1,0 +1,7 @@
+
+.DS_Store
+.idea
+*.pyc
+*.mat
+__pycache__/
+pytrx/__pycache__/
