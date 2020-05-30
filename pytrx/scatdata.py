@@ -1102,14 +1102,14 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
         x_loc = x[:, sel_loc]
         isOutlier_loc = isOutlier[sel_loc]
         x_av_loc = np.mean(x_loc[:, ~isOutlier_loc], axis=1)
-        plt.plot(q, x_loc[:, ~isOutlier_loc] - y_offset_i, 'k-', alpha=0.33)
+        plt.plot(q, x_loc[:, ~isOutlier_loc] - y_offset_i, 'k-', alpha=0.33, zorder=5)
         if x_loc[:, isOutlier_loc].size > 0:
-            plt.plot(q, x_loc[:, isOutlier_loc] - y_offset_i, 'b-')
-        plt.plot(q, x_av_loc - y_offset_i, 'r-')
+            plt.plot(q, x_loc[:, isOutlier_loc] - y_offset_i, 'b-', zorder=10)
+        plt.plot(q, x_av_loc - y_offset_i, 'r-', zorder=20)
         # print(np.sum(~isOutlier_loc), isOutlier_loc)
         msg = f'{each_t}\n{np.sum(~isOutlier_loc)}/{len(isOutlier_loc)}'
         plt.text(q.min() + (q.max() - q.min()) * 0.75, y_offset * 0.25 - y_offset_i, msg, va='center', ha='center',
-                 backgroundcolor='w')
+                 backgroundcolor='w', zorder=3)
 
     plt.hlines(-np.arange(chisqThresh.size) * y_offset, q.min(), q.max())
     plt.legend(custom_lines, ['Data', 'Outliers', 'Mean'])

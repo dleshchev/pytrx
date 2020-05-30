@@ -16,7 +16,7 @@ from pytrx import scatsim, hydro
 #   - the goal for Solute is to generate a function that computes Debye difference as a function of some parameters, where number of parameters goes from 0 (None) to whatever
 #   - it should be able to accept filepath (str), Molecule instance, VibratingMolecule (may be)
 #   - Solute output (or method, attribute, it should return) -  f(q, parameters), this f is the difference signal S_es(q,some_parameters) - S_gs(q, some_other_parameters), parameters should be ablot to be 0 or None
-#   - * write Cage class - accept dense girdded q, ds, and covariance (emphasize in Q space) OR accept diff_gr (TBD)
+#   - * write Cage class - accept dense gridded q, ds, and covariance (emphasize in Q space) OR accept diff_gr (TBD)
 #   - * write Solvent Class - TBD
 #   - * write fitting routines (regressors) - WLS, GLS, and TLS
 #   - More thoughts on Solute class:
