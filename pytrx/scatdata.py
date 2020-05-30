@@ -31,10 +31,11 @@ import pyFAI
 import fabio
 import scipy.io
 
-from pytrx.utils import DataContainer, _get_id09_columns_old, _get_id09_columns, time_str2num, time_num2str, invert_banded
-
+from pytrx.utils import DataContainer, _get_id09_columns_old, _get_id09_columns, time_str2num, time_num2str, \
+    invert_banded
 
 from matplotlib.lines import Line2D
+
 custom_lines = [Line2D([0], [0], color='k', lw=1),
                 Line2D([0], [0], color='b', lw=1),
                 Line2D([0], [0], color='r', lw=1)]
@@ -45,57 +46,58 @@ ignore_these_fields = ['covii', 'imageAv', 'logData']
 class ScatData:
     ''' This is a class for processing, storage, and loading of time resolved
         x-ray scattering data.
-        
+
         The workflow:
-        
+
         0. Declare the data object (ex: A):
         A = ScatData()
-        
+
         0a. Read log file A.readLog(<parameters>)
         0b. Load log fine A.load(path)
-            
+
         Provide the class with information on log data, input directory and output
-        directory. The initiation of the object will assert the correctness of 
+        directory. The initiation of the object will assert the correctness of
         the input to reduce the number of bugs down the line. For details see
         self.__init__ docstring.
-        
+
         1. Integrate the scattering images:
         A.integrate(<parameters>)
         Provide the method with the experimental geometry details. This will
         give you a named tuple A.total.<data> that contains integrated scattering
         data.
-        
-        2. Identify nasty outliers and get total scattering averages: 
+
+        2. Identify nasty outliers and get total scattering averages:
         A.getTotalAverages(<parameters>)
         Provide the method with rejection thresholds to obtain
         averaged curves. This method also marks the total curves that will not be
         used for calculation of averages or differences down the line.
         NB: For non-time-resolved data, you can stop here and do the analysis
         you want to perform.
-        
+
         3. Calculate differences:
         A.getDifferences(<parameters>)
         This method updates the A.diff.<data> with difference data calculated
         according to provided parameters.
-        
+
         4. Calculate average differences:
         A.getDiffAverages(<parameters>)
         Provide the method with rejection thresholds.
-        
+
         5. Save data using A.save(path)
-        
+
         6. Load data using A.load(path)
-        
+
         The methods invoked during the workflow update the
         attributes of the class instead of just providing returned values. This
-        might seem a bit counter-intuitive, but this approach results in a 
+        might seem a bit counter-intuitive, but this approach results in a
         convenient handling of multiple datasets in a uniform fashion down the
         line during the analysis.
-        
+
         *to see the meaning of <parameters> refer to methods' docstrings.
     '''
 
-    def __init__(self, inputFile, logFileStyle='biocars', ignoreFirst=False, nFirstFiles=None, dataInDir=None, smallLoad=False):
+    def __init__(self, inputFile, logFileStyle='biocars', ignoreFirst=False, nFirstFiles=None, dataInDir=None,
+                 smallLoad=False):
         '''
         To read the file:
 
@@ -125,7 +127,7 @@ class ScatData:
             extension = Path(inputFile).suffix
         elif type(inputFile) is list:
             extension = Path(inputFile[0]).suffix
-#            
+        #
         if extension == '.log':
             self.initializeLogFile(inputFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir)
         elif extension == '.h5':
@@ -133,8 +135,6 @@ class ScatData:
 
         if inputFile is None:
             self.initializeEmpty()
-
-
 
     def initializeLogFile(self, logFile, logFileStyle, ignoreFirst, nFirstFiles, dataInDir):
         if dataInDir is None:
@@ -153,7 +153,6 @@ class ScatData:
         self._identifyExistingFiles()
 
         self.logSummary()
-
 
     def _getLogData(self):
         '''
@@ -205,7 +204,6 @@ class ScatData:
         self.logData = pd.concat(logDataAsList, ignore_index=True)
         print('*** Done ***\n')
 
-
     def _assertCorrectInput(self):
         '''
         This method asserts the right input according to the logic described
@@ -239,7 +237,6 @@ class ScatData:
                 (self.logFileStyle == 'id09')), \
             'logFileStyle can be either "biocars" or "id09"'
 
-
     def _identifyExistingFiles(self):
         '''
         goes through the files listed in log files and checks if they exist
@@ -256,7 +253,6 @@ class ScatData:
                 idxToDel.append(i)
                 print(filePath, 'does not exist and will be excluded from analysis')
         self.logData = self.logData.drop(idxToDel)
-
 
     def logSummary(self):
         '''
@@ -287,9 +283,7 @@ class ScatData:
 
         print('*** End of summary ***\n')
 
-
     # 1. Integration of images
-
 
     def integrate(self, energy=12, distance=365, pixelSize=80e-6,
                   centerX=1900, centerY=1900, qRange=[0.0, 4.0], nqpt=400,
@@ -298,7 +292,7 @@ class ScatData:
                   correctSample=False, musample=0.49, lsample=300e-6,
                   plotting=True, nFiles=None):
         ''' This method integrates images given the geometry parameters.
-            
+
             You will need:
             energy - x-ray energy used in the experiment (in keV)
             distance - sample-to-detector distance (in mm)
@@ -319,9 +313,9 @@ class ScatData:
             lsample - thickness of the flat sheet
             dezinger - whether you want to dezinger images  (boolean) - depreciated
             plotting - whether you want to plot the output results (boolean)
-            nMax - number of Images you want to integrate. All imges will be 
+            nMax - number of Images you want to integrate. All imges will be
             integrates if nMax is None.
-            
+
             Method updates the following fields:
             self.q - transferred momentum in A^{-1}
             self.total.s_raw - raw integrated (total) curve
@@ -333,9 +327,9 @@ class ScatData:
                        timeStamp_str - time when the image was measured (string)
                        scanStamp - scan (logFile) name
                        imageAv - average image from all the scans
-                       isOutlier - creates isOutlier bool array. At this point 
+                       isOutlier - creates isOutlier bool array. At this point
                        all the curves are NOT outliers.
-            
+
         '''
         # Get all the ingredients for integration:
         if not hasattr(self, 'aiGeometry'):
@@ -418,7 +412,6 @@ class ScatData:
         if plotting:
             self.plotIntegrationResult()
 
-
     def _getaiGeometry(self, energy, distance, pixelSize, centerX, centerY, qRange, nqpt, qNormRange):
         '''Method for storing the geometry parameters in self.aiGeometry from
         the input to self.integrate() method.
@@ -439,7 +432,6 @@ class ScatData:
         timeStamp = np.array(timeStamp)
         timeStamp_str = np.array(timeStamp_str)
         return timeStamp, timeStamp_str
-
 
     def plotIntegrationResult(self):
         # get min and max of scale for average image
@@ -482,7 +474,6 @@ class ScatData:
         Tphos = (1 - np.exp(-cph)) / (1 - np.exp(-cph / cv))
         return Tphos
 
-
     def _getSampleAbsorptionCorrection(self, mu, l, tth):
         cv = np.cos(tth)  # cos value
         csa = mu * l
@@ -490,9 +481,7 @@ class ScatData:
         T0 = np.exp(-csa)
         return T0 / T
 
-
     # 2. Total curve averaging
-
 
     def getTotalAverages(self, fraction=0.9, chisqThresh=5, q_break=None,
                          dezinger=True, dezingerThresh=5, covShrinkage=0,
@@ -500,27 +489,27 @@ class ScatData:
         ''' Method calculates the total averages and gets rid of nasty outliers.
         It uses a chisq-based method for detecting outliers (see getAverage aux
         method).
-        
+
         You need:
         fraction - amount of data used for getting the effective average/std to detect
         outliers. By default it is 0.9 which means that the average/std are calculated
         using data between 0.05 and 0.95 percentiles.
-        
+
         chisqThresh - Threshold value of chisq, above which the data will be marked
         as ourtliers.
-        
+
         q_break - in case if you want to have a separate diagnostics for small and
         high q values, you can use q_break.
         chisqThresh_lowq - Threshold for chisq calculated for q<q_break
         chisqThresh_highq - Threshold for chisq calculated for q>=q_break
-        
+
         dezinger - flag in case if you want to dezinger the 1d curves
         dezingerThresh - threshold for dezingering (# of stds)
-        estimateCov - estimate covariance of total curves (usually not needed) 
+        estimateCov - estimate covariance of total curves (usually not needed)
         useCovShrinkage - use regularized method for covariance estimation
         covShrinkage - amount of shrinkage; if None, will be determined
         automatically (slow)
-        
+
         plotting - True if you want to see the results of the outlier rejection
         chisqHistMax - maximum value of chisq you want to plot histograms
         y_offset - amount of offset you want in the plot to show different time
@@ -540,7 +529,7 @@ class ScatData:
     def getDifferences(self, toff_str='-5us', subtractFlag='MovingAverage',
                        renormalize=False, qNormRange=None):
         ''' Method for calculating differences.
-        
+
         You will need:
         toff_str - time delay which you use for subtraction
         subtractFlag - the way you want to calculate the differences. It can have
@@ -552,14 +541,14 @@ class ScatData:
                                   reference curve.
                 'Previous'      - uses previous reference curve.
                 'Next'          - uses next reference curve..
-        
+
         renormalize - flag for renormalization of total curves. If True, will
         request keyword qNormRange and will use it to update total.s field.
         qNormRange - range for renormalization
-        
+
         NB: the difference calculation ignores curves marked True in
         self.total.isOutlier
-        
+
         The method updates/adds following fields:
         self.diff.s - difference curves
                   delay - delay (in s)
@@ -637,12 +626,13 @@ class ScatData:
                     Adiff[i, idx_prev] = -1
 
         self.diff.s = (Adiff @ self.total.s.T).T
+        self.diff.ds = np.copy(self.diff.s)
         self.diff.covii = Adiff @ self.total.covii @ Adiff.T
         self.Adiff = Adiff
         self.diff.isOutlier = np.ravel((np.sum(Adiff,
                                                axis=1) > 1e-6))  # argument of np.ravel is of matrix type which has ravel method working differently from np.ravel; we need np.ravel!
 
-        if subtractFlag == 'MovingAverage': # handle the rank deficiency for covii
+        if subtractFlag == 'MovingAverage':  # handle the rank deficiency for covii
             last_off = np.where((self.diff.delay_str == self.diff.toff_str) & ~self.diff.isOutlier)[0][-1]
             self.diff.isOutlier[last_off] = True
             a = self.diff.covii[last_off, last_off]
@@ -651,7 +641,6 @@ class ScatData:
             self.diff.covii[last_off, last_off] = a
 
         print('*** Done ***\n')
-
 
     def _findOffIdx(self, idx, direction):
         idx_start = idx
@@ -687,8 +676,8 @@ class ScatData:
                        fraction, chisqThresh, q_break,
                        dezinger=dezinger, dezingerThresh=dezingerThresh, covShrinkage=covShrinkage,
                        plotting=plotting, chisqHistMax=chisqHistMax, y_offset=y_offset)
+        self.diff.ds_av = np.copy(self.diff.s_av)
         print('*** Done ***\n')
-
 
     def plotDiffAverages(self, fig=None, y_offset=None, x_txt=None, y_txt=None, qpower=0):
         if fig is None:
@@ -715,7 +704,6 @@ class ScatData:
         f.close()
         print('*** Saving finished ***')
 
-
     def _save_group(self, savepath, f, dict, indent='', group=None):
         if group:
             print('Saving the following group:', group)
@@ -726,10 +714,10 @@ class ScatData:
 
         for key in dict.keys():
             if (dict[key] is None
-                or (type(dict[key]) == IntensityContainer)
-                or (type(dict[key]) == AIGeometry)
-                or (key == 'ai')
-                or (key == 'Adiff')):
+                    or (type(dict[key]) == IntensityContainer)
+                    or (type(dict[key]) == AIGeometry)
+                    or (key == 'ai')
+                    or (key == 'Adiff')):
                 continue
 
             print(indent, key, '\t', end=' ')
@@ -743,7 +731,8 @@ class ScatData:
             else:
                 try:
                     if ((type(dict[key]) == list)
-                        or ((type(dict[key]) == np.ndarray) and ((type(dict[key][0]) == str) or (type(dict[key][0]) == np.str_)))):
+                            or ((type(dict[key]) == np.ndarray) and (
+                                    (type(dict[key][0]) == str) or (type(dict[key][0]) == np.str_)))):
                         data = '|'.join(dict[key])
                     else:
                         data = dict[key]
@@ -752,8 +741,6 @@ class ScatData:
                     print('success')
                 except:
                     print('failed')
-
-
 
     def initializeFromH5(self, loadPath, smallLoad):
 
@@ -813,7 +800,6 @@ class ScatData:
 
         print('*** Loading finished ***')
 
-
     def initializeEmpty(self):
         self.q = None
         self.tth = None
@@ -846,9 +832,8 @@ class AIGeometry:
         self.qNormRange = np.array(qNormRange)
         # self.ai = self.getai()
 
-
     def getai(self):
-        self.ai =  pyFAI.AzimuthalIntegrator(
+        self.ai = pyFAI.AzimuthalIntegrator(
             dist=self.distance * 1e-3,
             poni1=self.centerY * self.pixelSize,
             poni2=self.centerX * self.pixelSize,
@@ -858,10 +843,9 @@ class AIGeometry:
             wavelength=self.wavelength)
 
 
-
 class IntensityContainer:
     def __init__(self, s_raw=None, s=None, s_av=None, s_err=None,
-                 s2=None, s2_av=None, s2_err=None, # These are anisotropy terms
+                 s2=None, s2_av=None, s2_err=None,  # These are anisotropy terms
                  normInt=None, covii=None, covqq=None, covtt=None,
                  chisq=None, isOutlier=None,
                  delay=None, delay_str=None, toff_str=None,
@@ -872,7 +856,7 @@ class IntensityContainer:
         self.s_av = s_av
         self.ds_av = s_av
         self.s_err = s_err
-        self.s2 = s2        # DJH 20/05/29, for adding anisotropic intensity
+        self.s2 = s2  # DJH 20/05/29, for adding anisotropic intensity
         self.s2_av = s2_av
         self.s2_err = s2_err
         self.normInt = normInt
@@ -902,13 +886,13 @@ class IntensityContainer:
 
 def medianDezinger1d(x_orig, fraction=0.9, kernel_size=5, thresh=5):
     ''' Function for dezingering 1D curves using median filter.
-    
+
     You need:
         x_orig - 1D curve
         fraction - fraction of data used for calculation of STD (default=0.9)
         kernel_size - kernel size for median filtering (default=5)
         thresh - STD multiplier for determination of the filtering threshold (default=5)
-        
+
     Output:
         x - dezingered data
     '''
@@ -949,14 +933,13 @@ def getAverage(q, x_orig, covii, isOutlier, delay_str, t_str, toff_str,
         covii = np.eye(delay_str.size)
 
     chisqThresh = np.array(chisqThresh)
-    if chisqThresh.size>1:
+    if chisqThresh.size > 1:
         q_break = np.array(q_break)
         assert q_break.size == (chisqThresh.size - 1)
-        q_break = np.hstack((q.min()-1e-6, q_break, q.max()+1e-6))
+        q_break = np.hstack((q.min() - 1e-6, q_break, q.max() + 1e-6))
     else:
         chisqThresh = chisqThresh[None]
-        q_break = np.array([q.min()-1e-6, q.max()+1e-6])
-
+        q_break = np.array([q.min() - 1e-6, q.max() + 1e-6])
 
     isOutlier, chisq = identifyOutliers_all(q, x, delay_str, t_str, isOutlier, fraction, chisqThresh, q_break,
                                             dezinger, dezingerThresh)
@@ -1032,7 +1015,7 @@ def identifyOutliers_all(q, x, delay_str, t_str, isOutlier, fraction, chisqThres
 
 
 def identifyOutliers_one(q_orig, y_orig, fraction, chisqThresh,
-                     q_break, dezingerThresh=5):
+                         q_break, dezingerThresh=5):
     ''' Function for identification of outliers in a given data set.
 
     The function calculates the average and the standard deviation using fraction
@@ -1076,8 +1059,8 @@ def identifyOutliers_one(q_orig, y_orig, fraction, chisqThresh,
     q_errsq = q[nnzStd]
 
     for idx, each_chisqThresh in enumerate(chisqThresh):
-        q_sel = (q_errsq > q_break[idx]) & (q_errsq <= q_break[idx+1])
-        chisq[idx, :] = np.nansum(errsq[q_sel, :], axis=0)/np.sum(q_sel)
+        q_sel = (q_errsq > q_break[idx]) & (q_errsq <= q_break[idx + 1])
+        chisq[idx, :] = np.nansum(errsq[q_sel, :], axis=0) / np.sum(q_sel)
 
     isOutlier = np.any(chisq >= chisqThresh[:, None], axis=0)
     isHotPixel = np.abs(y - ySel_av[:, None]) > dezingerThresh * ySel_std[:, None]
@@ -1099,21 +1082,19 @@ def getMedianSelection(z_orig, frac):
     return z
 
 
-
 def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
                  chisqThresh, q_break,
                  chisqHistMax, y_offset):
     ''' Fucntion to plot data and corresponding chisq histograms.
     '''
 
-    if len(chisq.shape)==1:
+    if len(chisq.shape) == 1:
         chisq = chisq[None, :]
 
     if y_offset is None:
         y_offset = np.abs(np.max(x[:, ~isOutlier]) - np.min(x[:, ~isOutlier]))
 
-
-    plt.figure(figsize=(12,7))
+    plt.figure(figsize=(12, 7))
     plt.subplot(121)
     for i, each_t in enumerate(t_str):
         y_offset_i = y_offset * i
@@ -1122,12 +1103,12 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
         isOutlier_loc = isOutlier[sel_loc]
         x_av_loc = np.mean(x_loc[:, ~isOutlier_loc], axis=1)
         plt.plot(q, x_loc[:, ~isOutlier_loc] - y_offset_i, 'k-', alpha=0.33)
-        if x_loc[:, isOutlier_loc].size>0:
+        if x_loc[:, isOutlier_loc].size > 0:
             plt.plot(q, x_loc[:, isOutlier_loc] - y_offset_i, 'b-')
         plt.plot(q, x_av_loc - y_offset_i, 'r-')
         # print(np.sum(~isOutlier_loc), isOutlier_loc)
         msg = f'{each_t}\n{np.sum(~isOutlier_loc)}/{len(isOutlier_loc)}'
-        plt.text(q.min() + (q.max()-q.min())*0.75, y_offset*0.25 - y_offset_i, msg, va='center', ha='center',
+        plt.text(q.min() + (q.max() - q.min()) * 0.75, y_offset * 0.25 - y_offset_i, msg, va='center', ha='center',
                  backgroundcolor='w')
 
     plt.hlines(-np.arange(chisqThresh.size) * y_offset, q.min(), q.max())
@@ -1151,10 +1132,10 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
         plt.plot([each_thresh, each_thresh], [-y_offset_i, -y_offset_i + y_offset], 'k--')
         plt.text(each_thresh, y_offset * 0.9 - y_offset_i, 'Threshold', va='center', ha='center', backgroundcolor='w')
         plt.text(chisqBins.min() + (chisqBins[:-2].max() - chisqBins.min()) * 0.75,
-                 y_offset * 0.5- y_offset_i, f'chisq for {np.round(q_break[i],2)}<q<{np.round(q_break[i+1],2)}',
+                 y_offset * 0.5 - y_offset_i, f'chisq for {np.round(q_break[i], 2)}<q<{np.round(q_break[i + 1], 2)}',
                  va='center', ha='center', backgroundcolor='w')
 
-    plt.hlines(-np.arange(chisqThresh.size)*y_offset, chisqBins[0], chisqBins[-2])
+    plt.hlines(-np.arange(chisqThresh.size) * y_offset, chisqBins[0], chisqBins[-2])
     plt.xlim(chisqBins[0], chisqBins[-2])
     plt.ylim(y_offset_i, y_offset)
     plt.ylabel('Occurances')
@@ -1162,20 +1143,20 @@ def plotOutliers(q, x, delay_str, t_str, isOutlier, chisq,
 
 
 def plotAvData(q, x, t_str, y_offset=None, x_txt=None, y_txt=None, qpower=0):
-    x_mult = x * q[:, None]**qpower
+    x_mult = x * q[:, None] ** qpower
 
     if y_offset is None:
         y_offset = np.abs(x_mult.max() - x_mult.min())
     if x_txt is None:
-        x_txt = q.min() + 0.8*(q.max() - q.min())
+        x_txt = q.min() + 0.8 * (q.max() - q.min())
     if y_txt is None:
-        y_txt = y_offset*0.15
+        y_txt = y_offset * 0.15
 
     for i, each_t in enumerate(t_str):
         y_offset_i = y_offset * i
         plt.plot(q, x_mult[:, i] - y_offset_i, 'k.-')
         plt.text(x_txt, y_txt - y_offset_i, each_t)
-    plt.hlines(-np.arange(len(t_str))*y_offset, q.min(), q.max(), colors=[0.5, 0.5, 0.5], linewidths=0.5)
+    plt.hlines(-np.arange(len(t_str)) * y_offset, q.min(), q.max(), colors=[0.5, 0.5, 0.5], linewidths=0.5)
 
     plt.xlabel('q, 1/A')
     if qpower == 0:
@@ -1197,7 +1178,7 @@ def distribute_Mat2ScatData(matfile):
     matdata = scipy.io.loadmat(matfile)
     data.q = matdata['data']['q'][0][0].squeeze()
     data.t = matdata['data']['t'][0][0].squeeze()
-    data.t_str = np.array([time_num2str(i*1e-12) for i in data.t])
+    data.t_str = np.array([time_num2str(i * 1e-12) for i in data.t])
     data.diff.s = matdata['data']['ds0'][0][0]
     data.diff.ds = np.copy(data.diff.s)  # Allow both s and ds be used
     data.diff.s2 = matdata['data']['ds2'][0][0]
@@ -1205,13 +1186,6 @@ def distribute_Mat2ScatData(matfile):
     data.diff.covtt = matdata['data']['covtt'][0][0]
     data.total.s_av = np.mean(matdata['data']['soff'][0][0], 1)[:, None]
     return data
-
-
-
-
-
-
-
 
 
 if __name__ == '__main__':
@@ -1240,7 +1214,7 @@ if __name__ == '__main__':
 #    A.getDifferences(toff_str='-3ns',
 #                     subtractFlag='MovingAverage')
 
-    # %%
+# %%
 #    A = ScatData(r'C:\pyfiles\pytrx_testing\bla.h5')
 #    A.getDiffAverages(fraction=0.9, chisqThresh=2.5, plotting=False, covShrinkage=0.01)
 #    A.getDiffAverages(fraction=0.9, chisqThresh=3, plotting=True)
