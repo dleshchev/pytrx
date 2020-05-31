@@ -1,9 +1,10 @@
 
 
 import numpy as np
+import copy
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
-from pytrx import scatsim, hydro
+from pytrx import scatsim, hydro, utils
 
 
 ## TODO:
@@ -164,7 +165,9 @@ class Solute:
 
         self.label = label
         self.mol_gs = self.parse_input(input_gs)
+        self.mol_gs_ref = self.parse_input(input_gs)
         self.mol_es = self.parse_input(input_es)
+        self.mol_es_ref = self.parse_input(input_es)
 
     def parse_input(self, input):
         if type(input) == str:
@@ -176,8 +179,72 @@ class Solute:
         # self.mol_es.move(*x) - consider this
         return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
 
+    def transform(self, moves=None):
+        '''
+        Returns the instance where the excited state structure is transformed by sequential steps
+        the arguments of moves will be a list of steps
+        each step is a list formatted below (list growing)
+        1. Move a group of atoms by a vector or a fixed distance along a vector
+        [ 'move_vector', [list of atom numbers], [3 element vector], (optional) amplitude in Angstrom]
+        2. Move two groups of atoms closer/further in distance, using simple mean of coordinates as
+           reference centers for each group.
+           Vector is from group1 to group2. Negative amplitude is shrinking.
+        [ 'distance', [list of atom numbers], [list of atom numbers], amplitude in Angstrom]
 
+        3. Move two group of atoms closer/further in distance, using center of mass as ref centers for each group
+           Vector is from group1 to group2. Negative amplitude is shrinking.
+        [ 'distanceCOM', [list of atom numbers], [list of atom numbers], amplitude in Angstrom]
 
+        Usage example, if C is a Molecule class,
+            moves = [['distance', [0], [10], i]]
+            C.transform(moves).signal(q)
+
+            or
+
+            moves = [['distance', [0], [10], i]]
+            C.transform(moves)
+            C.signal(q)
+        '''
+
+        # Resets the coordinate set to be transformed
+        self.mol_es = copy.deepcopy(self.mol_es_ref)
+
+        for i in moves:
+            if i[0] == 'move_vector':
+                assert len(i[2]) == 3, 'Translation vector not a 3 element vector'
+                try:
+                    unit_vec = i[2] / np.linalg.norm(i[2])
+                    self.mol_es.xyz[i[1]] += unit_vec * i[3]
+                    print(f'Moved atom(s) {i[1]} by vector of {unit_vec * i[3]}')
+                except:
+                    self.mol_es.xyz[i[1]] += i[2]
+                    print(f'Moved atom(s) {i[1]} by vector of {i[2]}')
+            if i[0] == 'distanceCOM':
+                assert (len(i) == 4), 'Incorrect number of arguments, should be 3'
+                assert (len(i[1]) > 0) and (len(i[2]) > 0), 'Cannot operate on empty set'
+                group1_Mass = np.sum(AtomicMass[self.mol_es.Z_num[i[1]]-1])
+                group1_COM = np.sum(self.mol_es.xyz[i[1]] * AtomicMass[self.mol_es.Z_num[i[1]] - 1], 0) / group1_Mass
+                group2_Mass = np.sum(AtomicMass[self.mol_es.Z_num[i[2]] - 1])
+                group2_COM = np.sum(self.mol_es.xyz[i[2]] * AtomicMass[self.mol_es.Z_num[i[2]] - 1], 0) / group2_Mass
+                unit_vec = (group2_COM - group1_COM) / np.linalg.norm(group2_COM - group1_COM)
+                self.mol_es.xyz[i[1]] -= unit_vec * i[3] / 2
+                self.mol_es.xyz[i[2]] += unit_vec * i[3] / 2
+            if i[0] == 'distance':
+                assert (len(i) == 4), 'Incorrect number of arguments, should be 4'
+                assert (len(i[1]) > 0) and (len(i[2]) > 0), 'Cannot operate on empty set'
+                group1_mean = np.mean(self.mol_es.xyz[i[1]], 0)
+                group2_mean = np.mean(self.mol_es.xyz[i[2]], 0)
+                unit_vec = (group2_mean - group1_mean) / np.linalg.norm(group2_mean - group1_mean)
+                # print(group2_mean)
+                # print(group1_mean)
+                # print(group2_mean - group1_mean)
+                # print(np.linalg.norm(group2_mean - group1_mean))
+                # print(unit_vec)
+                # print(unit_vec * i[3] / 2)
+                # print("\n")
+                self.mol_es.xyz[i[1]] -= unit_vec * i[3] / 2
+                self.mol_es.xyz[i[2]] += unit_vec * i[3] / 2
+        return self
 
 
 # class Solute:
