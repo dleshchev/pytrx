@@ -9,22 +9,42 @@ from math import pi
 from itertools import islice
 import numpy as np
 import pandas as pd
+import copy
 import matplotlib.pyplot as plt
 from pytrx.utils import z_str2num, z_num2str
 import pkg_resources
 
 from pytrx import hydro
+from pytrx.Transformation import *
 
 
 class Molecule:
     def __init__(self, Z, xyz,
-                 calc_gr=False, rmin=0, rmax=25, dr=0.01):
+                 calc_gr=False, rmin=0, rmax=25, dr=0.01,
+                 associated_transformation=None):
+        '''
+            associated_transformation will be either a transformation class or
+            a list of transformations
+        '''
         if type(Z) == str:
             Z = np.array([Z])
         self.Z = Z
         self.Z_num = np.array([z_str2num(z) for z in Z])
 
         self.xyz = xyz
+        self.xyz_ref = xyz.copy()
+        if associated_transformation is None:
+            self._associated_transformation = None
+        elif type(associated_transformation) != list:
+            self._associated_transformation = [associated_transformation]
+            # This is quite dangerous, maybe need to assert it's a Transformation base class
+            # Will be implemented in the future
+        else:
+            self._associated_transformation = associated_transformation
+
+        if self._associated_transformation is not None:
+            for transform in self._associated_transformation:
+                transform = transform.prepare(self)
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
@@ -45,6 +65,32 @@ class Molecule:
     def calcDens(self):
         self.gr.calcDens()
         self.dens = self.gr.dens
+
+    def transform(self, par=None, reprep=True):
+        '''
+        Transforms xyz based on the transformation supplied in the _associated_transformation.
+        Also takes the par which should be either None or a list that is the same length as the
+        number of transformations.
+        reprep: recalculate associated vectors, COMs, etc. after each step (as they might shift)
+                by calling the prepare() methods within each class.
+        '''
+
+        # Resets the coordinate set to be transformed
+        self.xyz = copy.deepcopy(self.xyz_ref)
+
+        assert (par is None) or (len(par) == len(self._associated_transformation)), \
+            "Number of parameters not matching transformations"
+        if par is None:
+            return self
+        else:
+            for p, transform in zip(par,self._associated_transformation):
+                if reprep:
+                    transform = transform.prepare(self)
+                self.xyz = transform.transform(self.xyz, p)
+            return self
+
+    def sum_parameters(self):
+        return len(self._associated_transformation)
 
 
 class GR:
@@ -237,7 +283,7 @@ def Compton(z, q):
     return S_inc
 
 
-def fromXYZ(filename, n_header=0):
+def fromXYZ(filename, n_header=0, transformation=None):
     Z = []
     xyz = []
     with open(filename) as f:
@@ -252,7 +298,7 @@ def fromXYZ(filename, n_header=0):
                 xyz.append([float(i) for i in values[1:]])
     xyz = np.array(xyz)
     Z = np.array(Z)
-    return Molecule(Z, xyz)
+    return Molecule(Z, xyz, associated_transformation=transformation)
 
 
 def FiletoZXYZ(filepath):
