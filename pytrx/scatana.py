@@ -206,6 +206,52 @@ class Solute:
             print("No moves supplied. No transformation happened.")
         return self
 
+class Solvent:
+
+    def __init__(self, q, dsdt, dsdr, sigma=None, K=None):
+        self.q = q
+        self.dsdt = dsdt
+        self.dsdr = dsdr
+        self.C = read_sigma(sigma)
+        self.K = K
+
+
+    def smooth(self):
+        pass
+
+
+
+class Cage:
+
+    def __init__(self, q, ds_cage, sigma=None):
+        self.q = q
+        self.ds_cage = ds_cage
+        self.C = read_sigma(sigma)
+
+
+
+def read_sigma(sigma):
+    '''
+    auxillary function for reading covariance matrix.
+    Args:
+        sigma: can be either
+        - one-dimensional numpy ndarray containing standard deviations of the measurement at each point
+        - two-dimensional numpy ndarray containing the full covariance matrix for the measurement
+
+    Returns:
+        two-dimensional covariance matrix
+    '''
+    if sigma is not None:
+        assert type(sigma) == np.ndarray, 'sigma must be an numpy ndarray'
+        if sigma.ndim == 1
+            return np.diag(sigma ** 2)
+        elif sigma.ndim == 2:
+            return sigma
+        else:
+            raise ValueError('sigma must be either 1d- or 2d array')
+    return None
+
+
 
 # def transform(self, moves=None):
     #     '''
