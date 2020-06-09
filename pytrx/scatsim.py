@@ -15,7 +15,7 @@ from pytrx.utils import z_str2num, z_num2str
 import pkg_resources
 
 from pytrx import hydro
-from pytrx.Transformation import *
+from pytrx.transformation import *
 
 
 class Molecule:

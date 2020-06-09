@@ -11,7 +11,7 @@ A library of predefined moves for the Molecule class.
 import numpy as np
 from pytrx.utils import AtomicMass
 
-class Transformation_move_vector:
+class transformation_move_vector:
     # Move a group of atoms along a vector (normalized)
     def __init__(self, group1, vector, amplitude0=0):
         self.group1 = np.array(group1)
@@ -31,7 +31,7 @@ class Transformation_move_vector:
         return xyz
 
 
-class Transformation_vib:
+class transformation_vib:
     def __init__(self, dxyz, amplitude0=0):
         self.dxyz = dxyz
         self.amplitude0 = amplitude0
@@ -49,7 +49,7 @@ class Transformation_vib:
 
 
 
-class Transformation_distance:
+class transformation_distance:
     # Move two groups of atoms closer/further in distance, using simple mean of coordinates as
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
@@ -79,10 +79,10 @@ class Transformation_distance:
 
         return xyz
 
-class Transformation_distance_1side:
+class transformation_distance_1side:
     pass
 
-class Transformation_distanceCOM:
+class transformation_distanceCOM:
     # Move two group of atoms closer/further in distance, using center of mass as ref centers for each group
     # Vector is from group1 to group2. Negative amplitude is shrinking.
     def __init__(self, group1, group2, amplitude0=0):
@@ -114,10 +114,10 @@ class Transformation_distanceCOM:
 
         return xyz
 
-class Transformation_distanceCOM_1side:
+class transformation_distanceCOM_1side:
     pass
 
-class Transform_rotation:
+class transform_rotation:
     def __init__(self, group1, axis, amplitude=0):
         # A, B, and C can be group of atoms.
         # Centers will be the mean of their coordinates.
@@ -127,7 +127,7 @@ class Transform_rotation:
         # Amplitude is in degrees
         pass
 
-class Transform_rotationCOM:
+class transform_rotationCOM:
     def __init__(self, group1, axis, amplitude=0):
         # A, B, and C can be group of atoms.
         # Centers will be the COM of their coordinates.
