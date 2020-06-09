@@ -92,18 +92,23 @@ class Molecule:
         #             transform = transform.prepare(self)
         #         self.xyz = transform.transform(self.xyz, p)
         #     return self
-
-        if par is not None:
+        #print(len(par))
+        if (par is not None) and (self._associated_transformation is not None):
             # Resets the coordinate set to be transformed
             # self.xyz = copy.deepcopy(self.xyz_ref)
             self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
 
-            assert (par is None) or (len(par) == len(self._associated_transformation)), \
+            assert (len(par) == len(self._associated_transformation)), \
                 "Number of parameters not matching transformations"
             for p, t in zip(par, self._associated_transformation):
                 if reprep:
                     t = t.prepare(self)
                 self.xyz = t.transform(self.xyz, p)
+
+
+    def clash(self):
+        # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
+        pass
 
 
     # def sum_parameters(self):

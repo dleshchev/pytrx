@@ -174,12 +174,15 @@ class Solute:
     def parse_input(self, input):
         if type(input) == str:
             # Takes the xyz file
+            print("Using scatsim.fromXYZ will result in no associated_transformation in the returned Molecule.")
+            print("You may want to consider creating the Molecule and pass it to the Solute.")
             return scatsim.fromXYZ(input)
         else:
             # Take the Molecule class
             return input
 
     def signal(self, q, pars=None):
+        # pars is a list for BOTH excited state (first) and ground state (second)
         if pars is None:
             pars_es, pars_gs = None, None
         else:
@@ -189,6 +192,15 @@ class Solute:
 
         return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
 
+    def list_pars(self):
+        # Because we pass to signal() a list of parameters which is not intuitive
+        print(f'There are {self.n_par_total} parameters to be passed to the pars argument as a list for signal method\n')
+        for i in np.arange(self.mol_es.n_par):
+            print(f'Parameter {i+1}: ES, {type(self.mol_es._associated_transformation[i])}')
+            print(f'{self.mol_es._associated_transformation[i].describe()}')
+        for i in np.arange(self.mol_gs.n_par):
+            print(f'Parameter {i+1+self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
+            print(f'{self.mol_gs._associated_transformation[i].describe()}')
 
         # if target == 'mol_es':
         #     return scatsim.Debye(q, self.mol_es)
