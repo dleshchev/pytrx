@@ -76,18 +76,31 @@ class Molecule:
         '''
 
         # Resets the coordinate set to be transformed
-        self.xyz = copy.deepcopy(self.xyz_ref)
+        # self.xyz = copy.deepcopy(self.xyz_ref)
+        #
+        # assert (par is None) or (len(par) == len(self._associated_transformation)), \
+        #     "Number of parameters not matching transformations"
+        # if par is None:
+        #     return self
+        # else:
+        #     for p, transform in zip(par,self._associated_transformation):
+        #         if reprep:
+        #             transform = transform.prepare(self)
+        #         self.xyz = transform.transform(self.xyz, p)
+        #     return self
 
-        assert (par is None) or (len(par) == len(self._associated_transformation)), \
-            "Number of parameters not matching transformations"
-        if par is None:
-            return self
-        else:
-            for p, transform in zip(par,self._associated_transformation):
+        if par is not None:
+            # Resets the coordinate set to be transformed
+            # self.xyz = copy.deepcopy(self.xyz_ref)
+            self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
+
+            assert (par is None) or (len(par) == len(self._associated_transformation)), \
+                "Number of parameters not matching transformations"
+            for p, t in zip(par, self._associated_transformation):
                 if reprep:
-                    transform = transform.prepare(self)
-                self.xyz = transform.transform(self.xyz, p)
-            return self
+                    t = t.prepare(self)
+                self.xyz = t.transform(self.xyz, p)
+
 
     def sum_parameters(self):
         return len(self._associated_transformation)
