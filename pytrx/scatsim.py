@@ -92,7 +92,8 @@ class Molecule:
         #             transform = transform.prepare(self)
         #         self.xyz = transform.transform(self.xyz, p)
         #     return self
-        #print(len(par))
+        # print(len(par))
+        # print(len(self._associated_transformation))
         if (par is not None) and (self._associated_transformation is not None):
             # Resets the coordinate set to be transformed
             # self.xyz = copy.deepcopy(self.xyz_ref)
@@ -101,6 +102,7 @@ class Molecule:
             assert (len(par) == len(self._associated_transformation)), \
                 "Number of parameters not matching transformations"
             for p, t in zip(par, self._associated_transformation):
+                # print(t)
                 if reprep:
                     t = t.prepare(self)
                 self.xyz = t.transform(self.xyz, p)
