@@ -157,7 +157,6 @@ class Metadata:
 class Solute:
 
     def __init__(self, input_gs=None, input_es=None,
-                 transformation_gs=None, transformtaion_es=None,
                  label=None):
 
         '''
@@ -165,46 +164,58 @@ class Solute:
         '''
 
         self.label = label
-        self.mol_gs = self.parse_input(input_gs, transformation_gs)
+        self.mol_gs = self.parse_input(input_gs)
         # self.mol_gs_ref = self.parse_input(input_gs)
-        self.mol_es = self.parse_input(input_es, transformtaion_es)
+        self.mol_es = self.parse_input(input_es)
+
+        self.n_par_total = self.mol_es.n_par + self.mol_gs.n_par
         # self.mol_es_ref = self.parse_input(input_es)
 
-    def parse_input(self, input, transformation):
+    def parse_input(self, input):
         if type(input) == str:
             # Takes the xyz file
-            return scatsim.fromXYZ(input, transformation=transformation)
+            return scatsim.fromXYZ(input)
         else:
             # Take the Molecule class
             return input
 
-    def signal(self, q, target):
-        if target == 'mol_es':
-            return scatsim.Debye(q, self.mol_es)
-        elif target == 'mol_gs':
-            return scatsim.Debye(q, self.mol_gs)
+    def signal(self, q, pars=None):
+        if pars is None:
+            pars_es, pars_gs = None, None
         else:
-            print("No signal is calculated as no target is specified. None returned.")
+            pars_es, pars_gs = pars[:self.mol_es.n_par], pars[self.mol_es.n_par:]
+        self.mol_es.transform(pars_es)
+        self.mol_gs.transform(pars_gs)
 
-    def diff_signal(self, q):
-        '''
-        Originally just 'signal' but changed to 'diff_signal' as this is calculating difference signal
-        '''
-        # self.mol_es.move(*x) - consider this
         return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
 
-    def transform(self, target, par=None):
-        '''
-            Interface function
-        '''
-        if par is not None:
-            if target == 'mol_es':
-                self.mol_es = self.mol_es.transform(par=par)
-            if target == 'mol_gs':
-                self.mol_gs = self.mol_gs.transform(par=par)
-        else:
-            print("No moves supplied. No transformation happened.")
-        return self
+
+        # if target == 'mol_es':
+        #     return scatsim.Debye(q, self.mol_es)
+        # elif target == 'mol_gs':
+        #     return scatsim.Debye(q, self.mol_gs)
+        # else:
+        #     print("No signal is calculated as no target is specified. None returned.")
+
+    # def diff_signal(self, q):
+    #     '''
+    #     Originally just 'signal' but changed to 'diff_signal' as this is calculating difference signal
+    #     '''
+    #     # self.mol_es.move(*x) - consider this
+    #     return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
+    #
+    # def transform(self, target, par=None):
+    #     '''
+    #         Interface function
+    #     '''
+    #     if par is not None:
+    #         if target == 'mol_es':
+    #             self.mol_es = self.mol_es.transform(par=par)
+    #         if target == 'mol_gs':
+    #             self.mol_gs = self.mol_gs.transform(par=par)
+    #     else:
+    #         print("No moves supplied. No transformation happened.")
+    #     return self
 
 
 

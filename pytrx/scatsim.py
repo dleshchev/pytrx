@@ -33,6 +33,7 @@ class Molecule:
 
         self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
+
         if associated_transformation is None:
             self._associated_transformation = None
         elif type(associated_transformation) != list:
@@ -45,6 +46,9 @@ class Molecule:
         if self._associated_transformation is not None:
             for transform in self._associated_transformation:
                 transform = transform.prepare(self)
+            self.n_par = len(self._associated_transformation)
+        else:
+            self.n_par = 0
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
@@ -102,8 +106,9 @@ class Molecule:
                 self.xyz = t.transform(self.xyz, p)
 
 
-    def sum_parameters(self):
-        return len(self._associated_transformation)
+    # def sum_parameters(self):
+    #     if self._associated_transformation is not None:
+    #         return len(self._associated_transformation)
 
 
 class GR:
