@@ -31,6 +31,24 @@ class Transformation_move_vector:
         return xyz
 
 
+class Transformation_vib:
+    def __init__(self, dxyz, amplitude0=0):
+        self.dxyz = dxyz
+        self.amplitude0 = amplitude0
+
+    def prepare(self, mol):
+        assert self.dxyz.shape[0] == mol.xyz.shape[0], 'number of atoms in transformation and in the molecule must match'
+        return self
+
+    def transform(self, xyz, amplitude=None):
+        if amplitude is None:
+            amplitude = self.amplitude0
+        return (xyz + self.dxyz * amplitude)
+
+
+
+
+
 class Transformation_distance:
     # Move two groups of atoms closer/further in distance, using simple mean of coordinates as
     # reference centers for each group.

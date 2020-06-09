@@ -206,6 +206,10 @@ class Solute:
             print("No moves supplied. No transformation happened.")
         return self
 
+
+
+
+
 class Solvent:
 
     def __init__(self, q, dsdt, dsdr, sigma=None, K=None):
@@ -243,7 +247,7 @@ def read_sigma(sigma):
     '''
     if sigma is not None:
         assert type(sigma) == np.ndarray, 'sigma must be an numpy ndarray'
-        if sigma.ndim == 1
+        if sigma.ndim == 1:
             return np.diag(sigma ** 2)
         elif sigma.ndim == 2:
             return sigma

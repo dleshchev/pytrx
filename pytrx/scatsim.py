@@ -31,7 +31,7 @@ class Molecule:
         self.Z = Z
         self.Z_num = np.array([z_str2num(z) for z in Z])
 
-        self.xyz = xyz
+        self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
         if associated_transformation is None:
             self._associated_transformation = None
@@ -283,7 +283,7 @@ def Compton(z, q):
     return S_inc
 
 
-def fromXYZ(filename, n_header=0, transformation=None):
+def fromXYZ(filename, n_header=0, associated_transformation=None):
     Z = []
     xyz = []
     with open(filename) as f:
@@ -298,7 +298,7 @@ def fromXYZ(filename, n_header=0, transformation=None):
                 xyz.append([float(i) for i in values[1:]])
     xyz = np.array(xyz)
     Z = np.array(Z)
-    return Molecule(Z, xyz, associated_transformation=transformation)
+    return Molecule(Z, xyz, associated_transformation=associated_transformation)
 
 
 def FiletoZXYZ(filepath):
