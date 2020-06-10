@@ -1,5 +1,4 @@
 
-
 import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
@@ -40,7 +39,7 @@ class SmallMoleculeProject:
             input_data - .h5 file created using ScatData.save method
             **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
         '''
-        #print(type(input_data), type(input_data) == ScatData)
+        # print(type(input_data), type(input_data) == ScatData)
         if type(input_data) == str:
             self.data = ScatData(input_data, smallLoad=True)
         elif type(input_data) == ScatData:
@@ -84,7 +83,7 @@ class SmallMoleculeProject:
         if plotting:
             plt.figure(fig)
             plt.clf()
-            plt.plot(q, s_off*scale, 'k-', label=('data (' + str(self.data.diff.toff_str) + ')'))
+            plt.plot(q, s_off *scale, 'k-', label=('data (' + str(self.data.diff.toff_str) + ')'))
             plt.plot(q, s_th, 'r--', label='solvent (gas)')
             plt.xlabel('q, 1/A')
             plt.ylabel('S(q), e.u.')
@@ -197,10 +196,10 @@ class Solute:
             return input
 
 
-    def signal(self, q, pars=None):
-        # pars is a list for BOTH excited state (first) and ground state (second)
-        if pars is None:
-            pars_es, pars_gs = None, None
+    # def signal(self, q, pars=None):
+    #     # pars is a list for BOTH excited state (first) and ground state (second)
+    #    if pars is None:
+    #        pars_es, pars_gs = None, None
 
     def s(self, q, pars=None, target='mol_es'):
         '''
@@ -218,30 +217,29 @@ class Solute:
                 return scatsim.Debye(q, self.mol_gs)
             else:
                 return np.zeros(q.shape)
-
         else:
             print("No signal is calculated as no target is specified. None returned.")
 
-
-    def ds(self, q, pars):
+    def ds(self, q, pars=None):
         '''
         Originally just 'signal' but changed to 'ds' as this is calculating difference signal
         '''
         # self.mol_es.move(*x) - consider this
-        pars_es, pars_gs = deal_pars(pars, self.n_par_total)
+        pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
+        print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
         return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
 
     def list_pars(self):
         # Because we pass to signal() a list of parameters which is not intuitive
-        print(f'List paramters: \n'
+        print(f'Listing parameters: \n'
               f'There are {self.n_par_total} parameters to be passed '
-              f'to the pars argument as a list for signal method\n')
+              f'to the pars argument as a list for ds method\n')
         for i in np.arange(self.mol_es.n_par):
-            print(f'Parameter {i+1}: ES, {type(self.mol_es._associated_transformation[i])}')
+            print(f'Parameter { i +1}: ES, {type(self.mol_es._associated_transformation[i])}')
             self.mol_es._associated_transformation[i].describe()
             print("")
         for i in np.arange(self.mol_gs.n_par):
-            print(f'Parameter {i+1+self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
+            print(f'Parameter { i + 1 +self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
             self.mol_gs._associated_transformation[i].describe()
             print("")
         # if target == 'mol_es':
@@ -252,14 +250,14 @@ class Solute:
         #     print("No signal is calculated as no target is specified. None returned.")
 
 
-    def ds(self, q, pars):
-        '''
-        Originally just 'signal' but changed to 'ds' as this is calculating difference signal
-        '''
-        # self.mol_es.move(*x) - consider this
-        pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
-        print(pars_es, pars_gs)
-        return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
+    # def ds(self, q, pars):
+    #     '''
+    #     Originally just 'signal' but changed to 'ds' as this is calculating difference signal
+    #     '''
+    #     # self.mol_es.move(*x) - consider this
+    #     pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
+    #     print(pars_es, pars_gs)
+    #     return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
 
 
             # scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
@@ -332,12 +330,6 @@ def deal_pars(pars, n):
         pars_es, pars_gs = None, None
     else:
         pars_es, pars_gs = pars[:n], pars[n:]
-
-    if len(pars_es) == 0: pars_es = None
-    if len(pars_gs) == 0: pars_gs = None
+        if len(pars_es) == 0: pars_es = None
+        if len(pars_gs) == 0: pars_gs = None
     return pars_es, pars_gs
-
-
-
-
-

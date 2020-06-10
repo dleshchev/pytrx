@@ -88,9 +88,10 @@ class Molecule:
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
                 if reprep:
-                    t = t.prepare(self)
+                    # t = t.prepare(self)
+                    t.prepare(self)
                 self.xyz = t.transform(self.xyz, p)
-
+        return self
 
     def clash(self):
         # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
