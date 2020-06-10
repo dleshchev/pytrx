@@ -63,6 +63,7 @@ tetrahydrofuran = HydroProperties(density=889,                     # kg/m3
                                   molar_mass=72.11e-3,             # kg/mol
                                   )
 tetrahydrofuran.Z = np.array(['O']*1 + ['C']*4 + ['H']*8)
+# structure is taken from SI of Cryst. Growth Des., 2015, 15 (3), pp 1073–1081 DOI: 10.1021/cg501228w
 tetrahydrofuran.xyz = np.array([[ 0.000760889, -0.000738525, -1.456851081],
                                 [-0.652804737, -0.977671000, -0.666797608],
                                 [-0.135276924, -0.754196802,  0.753993299],
