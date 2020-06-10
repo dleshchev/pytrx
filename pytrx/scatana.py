@@ -208,6 +208,13 @@ class Solute:
             print("No signal is calculated as no target is specified. None returned.")
 
 
+    def ds(self, q, pars):
+        '''
+        Originally just 'signal' but changed to 'ds' as this is calculating difference signal
+        '''
+        # self.mol_es.move(*x) - consider this
+        pars_es, pars_gs = deal_pars(pars, self.n_par_total)
+        return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
 
     def list_pars(self):
         # Because we pass to signal() a list of parameters which is not intuitive
@@ -228,16 +235,6 @@ class Solute:
         #     return scatsim.Debye(q, self.mol_gs)
         # else:
         #     print("No signal is calculated as no target is specified. None returned.")
-
-
-    def ds(self, q, pars):
-        '''
-        Originally just 'signal' but changed to 'ds' as this is calculating difference signal
-        '''
-        # self.mol_es.move(*x) - consider this
-        pars_es, pars_gs = deal_pars(pars, self.n_par_total)
-        return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
-
 
 
             # scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
