@@ -12,7 +12,7 @@ import numpy as np
 import math
 from pytrx.utils import AtomicMass
 
-class transformation_move_vector:
+class Transformation_move_vector:
     # Move a group of atoms along a vector (normalized)
     def __init__(self, group1, vector, amplitude0=0):
         self.group1 = np.array(group1)
@@ -38,7 +38,7 @@ class transformation_move_vector:
         return xyz
 
 
-class transformation_vibration:
+class Transformation_vibration:
     def __init__(self, dxyz, amplitude0=0):
         self.dxyz = dxyz
         self.amplitude0 = amplitude0
@@ -60,7 +60,7 @@ class transformation_vibration:
 
 
 
-class transformation_distance:
+class Transformation_distance:
     # Move two groups of atoms closer/further in distance, using simple mean of coordinates as
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
@@ -98,7 +98,7 @@ class transformation_distance:
         return xyz
 
 
-class transformation_distance_1side:
+class Transformation_distance_1side:
     # Move GROUP 2 toward/away from GROUP 1 in distance, using simple mean of coordinates as
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
@@ -134,7 +134,7 @@ class transformation_distance_1side:
 
         return xyz
 
-class transformation_distanceCOM:
+class Transformation_distanceCOM:
     # Move two group of atoms closer/further in distance, using center of mass as ref centers for each group
     # Vector is from group1 to group2. Negative amplitude is shrinking.
     def __init__(self, group1, group2, amplitude0=0):
@@ -175,7 +175,7 @@ class transformation_distanceCOM:
         return xyz
 
 
-class transformation_distanceCOM_1side:
+class Transformation_distanceCOM_1side:
     # Move GROUP 2 toward/away from GROUP 1 in distance, using center of mass as ref centers for each group
     # Vector is from group1 to group2. Negative amplitude is shrinking.
     # GROUP 1 is fixed.
@@ -214,7 +214,7 @@ class transformation_distanceCOM_1side:
         return xyz
 
 
-class transformation_rotation:
+class Transformation_rotation:
     def __init__(self, group1, axis_groups, amplitude=0):
         # A, B, and C can be group of atoms.
         # Centers will be the mean of their coordinates.
@@ -273,7 +273,7 @@ class transformation_rotation:
 
             return xyz
 
-class transformation_rotationCOM:
+class Transformation_rotationCOM:
     def __init__(self, group1, axis_groups, amplitude=0):
         # A, B, and C can be group of atoms.
         # Centers will be the mean of their coordinates.
