@@ -92,13 +92,28 @@ class SmallMoleculeProject:
             plt.xlim(q.min(), q.max())
 
 
-    def submit_candidates(self, candidate_list):
-        q = self.data.q
-        R = self.solvent_per_solute()
-        self.ds_solute = np.zeros(q.size, len(candidate_list))
-        self.ds_labels = np.array([i.label for i in candidate_list])
-        for i, candidate in enumerate(candidate_list):
-            self.ds_solute[:, i] = (scatsim.Debye(q, candidate.mol_es) - scatsim.Debye(q, candidate.mol_gs))/R
+    def add_solute(self, solute_instance):
+        # q = self.data.q
+        # R = self.solvent_per_solute()
+
+        self.solute = solute_instance
+
+        # self.ds_solute = np.zeros(q.size, len(candidate_list))
+        # self.ds_labels = np.array([i.label for i in candidate_list])
+        # for i, candidate in enumerate(candidate_list):
+        #     self.ds_solute[:, i] = (scatsim.Debye(q, candidate.mol_es) - scatsim.Debye(q, candidate.mol_gs))/R
+
+
+    def add_solvent(self, solvent_instance):
+        self.solvent = solvent_instance
+
+
+    def add_cage(self, cage_instance):
+        self.cage = cage_instance
+
+
+    def fit(self, p0, method='gls'):
+        pass
 
 
     def solvent_per_solute(self):
