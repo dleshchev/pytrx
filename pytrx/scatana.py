@@ -179,30 +179,37 @@ class Solute:
             # Take the Molecule class
             return input
 
-    def signal(self, q, pars=None):
-        if pars is None:
-            pars_es, pars_gs = None, None
+    def s(self, q, pars=None, target='mol_es'):
+        '''
+        Computes the signal for es/gs molecule using provided parameters and a q-grid
+        '''
+        if target == 'mol_es':
+            if self.mol_es is not None:
+                self.mol_es.transform(pars)
+                return scatsim.Debye(q, self.mol_es)
+            else:
+                return np.zeros(q.shape)
+        elif target == 'mol_gs':
+            if self.mol_gs is not None:
+                self.mol_gs.transform(pars)
+                return scatsim.Debye(q, self.mol_gs)
+            else:
+                return np.zeros(q.shape)
         else:
-            pars_es, pars_gs = pars[:self.mol_es.n_par], pars[self.mol_es.n_par:]
-        self.mol_es.transform(pars_es)
-        self.mol_gs.transform(pars_gs)
-
-        return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
+            print("No signal is calculated as no target is specified. None returned.")
 
 
-        # if target == 'mol_es':
-        #     return scatsim.Debye(q, self.mol_es)
-        # elif target == 'mol_gs':
-        #     return scatsim.Debye(q, self.mol_gs)
-        # else:
-        #     print("No signal is calculated as no target is specified. None returned.")
 
-    # def diff_signal(self, q):
-    #     '''
-    #     Originally just 'signal' but changed to 'diff_signal' as this is calculating difference signal
-    #     '''
-    #     # self.mol_es.move(*x) - consider this
-    #     return scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
+    def ds(self, q, pars):
+        '''
+        Originally just 'signal' but changed to 'ds' as this is calculating difference signal
+        '''
+        # self.mol_es.move(*x) - consider this
+        pars_es, pars_gs = deal_pars(pars, self.n_par_total)
+        return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
+
+
+            # scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
     #
     # def transform(self, target, par=None):
     #     '''
@@ -265,6 +272,17 @@ def read_sigma(sigma):
         else:
             raise ValueError('sigma must be either 1d- or 2d array')
     return None
+
+
+def deal_pars(pars, n):
+    if pars is None:
+        pars_es, pars_gs = None, None
+    else:
+        pars_es, pars_gs = pars[:n], pars[n:]
+
+    if len(pars_es) == 0: pars_es = None
+    if len(pars_gs) == 0: pars_gs = None
+    return pars_es, pars_gs
 
 
 
