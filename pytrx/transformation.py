@@ -11,6 +11,29 @@ A library of predefined moves for the Molecule class.
 import numpy as np
 import math
 from pytrx.utils import AtomicMass
+from abc import (ABC as _ABC, abstractmethod as _abstractmethod)
+
+
+class Transformtaion(_ABC):
+    ''' Abstract class for transformations
+
+    '''
+
+    def __init__(self):
+        pass
+
+    @_abstractmethod
+    def prepare(self, mol):
+        '''computes the necessary '''
+
+    @_abstractmethod
+    def describe(self, mol):
+        '''transformation description '''
+
+    @_abstractmethod
+    def transform(self, xyz, amplitude0=0):
+        ''' takes xyz and returns an updated one'''
+
 
 class Transformation_move_vector:
     # Move a group of atoms along a vector (normalized)
