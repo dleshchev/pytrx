@@ -235,7 +235,8 @@ class Solute:
         Originally just 'signal' but changed to 'ds' as this is calculating difference signal
         '''
         # self.mol_es.move(*x) - consider this
-        pars_es, pars_gs = deal_pars(pars, self.n_par_total)
+        pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
+        print(pars_es, pars_gs)
         return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
 
 
