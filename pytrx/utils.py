@@ -135,3 +135,55 @@ def ElementString():
 def AtomicMass():
     AtomicMass = np.array([1.00797, 4.0026, 6.941, 9.01218, 10.81, 12.011, 14.0067, 15.9994, 18.998403, 20.179, 22.98977, 24.305, 26.98154, 28.0855, 30.97376, 32.06, 35.453, 39.0983, 39.948, 40.08, 44.9559, 47.9, 50.9415, 51.996, 54.938, 55.847, 58.7, 58.9332, 63.546, 65.38, 69.72, 72.59, 74.9216, 78.96, 79.904, 83.8, 85.4678, 87.62, 88.9059, 91.22, 92.9064, 95.94, -98, 101.07, 102.9055, 106.4, 107.868, 112.41, 114.82, 118.69, 121.75, 126.9045, 127.6, 131.3, 132.9054, 137.33, 138.9055, 140.12, 140.9077, 144.24, -145, 150.4, 151.96, 157.25, 158.9254, 162.5, 164.9304, 167.26, 168.9342, 173.04, 174.967, 178.49, 180.9479, 183.85, 186.207, 190.2, 192.22, 195.09, 196.9665, 200.59, 204.37, 207.2, 208.9804, 209, 210, 222, 223, 226.0254, 227.0278, 231.0359, 232.0381, 237.0482, 238.029])
     return AtomicMass
+
+
+def convolutedExpDecay(t, tau, tzero, fwhm):
+   t = t - tzero
+   sigma = fwhm/2.355
+   val = sigma**2 - tau*t
+   return ( 1/2 * np.exp( (sigma**2 - 2*tau*t) / (2*tau**2) )*
+           (1 + (np.sign(-val) * erf(np.abs(val) / (np.sqrt(2)*sigma*tau)))) )
+
+
+
+def convolutedStep(t, tzero, fwhm):
+   t = t - tzero
+   sigma = fwhm/2.355
+   val = t / (np.sqrt(2)*sigma)
+   return (1/2 * (1 + erf(val)))
+
+
+#     def applyPolyCorrection(self, q_poly, E, I, E_eff='auto'):
+#         self.s_poly = self._PolyCorrection(self.q, self.s, q_poly, E, I, E_eff=E_eff)
+#         self.polyFlag = True
+#
+#     def _PolyCorrection(self, q_mono, s_mono, q_poly, E, I, E_eff):
+#         I = I[np.argsort(E)]
+#         E = np.sort(E)
+#
+#         if E_eff == 'auto':
+#             E_eff = E[np.argmax(I)]
+#
+#         I = I / np.sum(I)
+#
+#         W = 12.3984 / E
+#         W_eff = 12.3984 / E_eff
+#
+#         tth_mono = 2 * np.arcsin(q_mono[:, np.newaxis] * W[np.newaxis] / (4 * pi)) * 180 / (pi)
+#         tth_poly = 2 * np.arcsin(q_poly * W_eff / (4 * pi)) * 180 / (pi)
+#
+#         if not np.all(tth_poly[0] > tth_mono[0, 0]):
+#             raise ValueError('Input q range is too narrow: Decrease q_mono min.')
+#         if not tth_poly[-1] < tth_mono[-1, -1]:
+#             raise ValueError('Input q range is too narrow: Increase q_mono max.')
+#
+#         if len(s_mono.shape) == 1:
+#             s_mono = s_mono[:, np.newaxis]
+#
+#         nCurves = s_mono.shape[1]
+#         s_poly = np.zeros((q_poly.size, nCurves))
+#         for i in range(nCurves):
+#             for j, e in enumerate(E):
+#                 s_poly[:, i] += I[j] * np.interp(tth_poly, tth_mono[:, j], s_mono[:, i])
+#
+#         return s_poly
