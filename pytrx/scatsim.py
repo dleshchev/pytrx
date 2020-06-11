@@ -36,12 +36,17 @@ class Molecule:
 
         if associated_transformation is None:
             self._associated_transformation = None
-        elif type(associated_transformation) != list:
+        elif type(associated_transformation) == list:
+            print("associated_transformation is a list. Examining elements...")
+            for t in associated_transformation:
+                assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
+            self._associated_transformation = associated_transformation
+        elif issubclass(type(associated_transformation), Transformation):
             self._associated_transformation = [associated_transformation]
             # This is quite dangerous, maybe need to assert it's a Transformation base class
             # Will be implemented in the future
         else:
-            self._associated_transformation = associated_transformation
+            raise TypeError('Supplied transformations must be None, a transformation class, or a list of it')
 
         if self._associated_transformation is not None:
             for transform in self._associated_transformation:
@@ -88,9 +93,10 @@ class Molecule:
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
                 if reprep:
-                    t = t.prepare(self)
+                    # t = t.prepare(self)
+                    t.prepare(self)
                 self.xyz = t.transform(self.xyz, p)
-
+        return self
 
     def clash(self):
         # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
