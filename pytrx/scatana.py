@@ -201,33 +201,22 @@ class Solute:
     #    if pars is None:
     #        pars_es, pars_gs = None, None
 
-    def s(self, q, pars=None, target='mol_es'):
-        '''
-        Computes the signal for es/gs molecule using provided parameters and a q-grid
-        '''
-        if target == 'mol_es':
-            if self.mol_es is not None:
-                self.mol_es.transform(pars)
-                return scatsim.Debye(q, self.mol_es)
-            else:
-                return np.zeros(q.shape)
-        elif target == 'mol_gs':
-            if self.mol_gs is not None:
-                self.mol_gs.transform(pars)
-                return scatsim.Debye(q, self.mol_gs)
-            else:
-                return np.zeros(q.shape)
-        else:
-            print("No signal is calculated as no target is specified. None returned.")
 
-    def ds(self, q, pars=None):
+    def ds(self, q, pars=None, reprep=True):
         '''
         Originally just 'signal' but changed to 'ds' as this is calculating difference signal
         '''
         # self.mol_es.move(*x) - consider this
         pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
         print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
-        return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
+        if (self.mol_es is not None) and (self.mol_gs is not None):
+            return self.mol_es.s(q, pars_es, reprep) - self.mol_gs.s(q, pars_gs, reprep)
+        elif self.mol_gs is not None:
+            return - self.mol_gs.s(q, pars_gs, reprep)
+        elif self.mol_es is not None:
+            return self.mol_es.s(q, pars_es, reprep)
+        else:
+            return np.zeros(q.shape)
 
     def list_pars(self):
         # Because we pass to signal() a list of parameters which is not intuitive

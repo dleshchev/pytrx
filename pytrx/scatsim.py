@@ -34,23 +34,24 @@ class Molecule:
         self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
 
+        print("Running initial check up for associated_transformation")
         if associated_transformation is None:
             self._associated_transformation = None
-        elif type(associated_transformation) == list:
+        elif type(associated_transformation) is list:
             print("associated_transformation is a list. Examining elements...")
             for t in associated_transformation:
+                print(f'Checking {t}')
+                #print(f'{type(t)}')
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
             self._associated_transformation = [associated_transformation]
-            # This is quite dangerous, maybe need to assert it's a Transformation base class
-            # Will be implemented in the future
         else:
             raise TypeError('Supplied transformations must be None, a transformation class, or a list of it')
 
         if self._associated_transformation is not None:
             for transform in self._associated_transformation:
-                transform = transform.prepare(self)
+                transform.prepare(self.xyz, self.Z_num)
             self.n_par = len(self._associated_transformation)
         else:
             self.n_par = 0
@@ -92,16 +93,17 @@ class Molecule:
                 "Number of parameters not matching transformations"
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
-                if reprep:
-                    # t = t.prepare(self)
-                    t.prepare(self)
-                self.xyz = t.transform(self.xyz, p)
+                self.xyz = t.transform(self.xyz, self.Z_num, p)
         return self
 
     def clash(self):
         # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
         pass
 
+    def s(self, q, pars=None, reprep=True):
+        if pars is not None:
+            self.transform(pars, reprep)
+        return Debye(q, self)
 
     # def sum_parameters(self):
     #     if self._associated_transformation is not None:
