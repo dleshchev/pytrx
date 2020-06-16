@@ -237,7 +237,7 @@ class Solute:
                 'nummber of parameteres should match the sum of numbers of parameters for gs and es'
         pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
         print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
-        return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
+        return self.mol_es.s(q, pars=pars_es) - self.mol_gs.s(q, pars=pars_gs)
 
     def list_pars(self, return_labels=False):
         # Because we pass to signal() a list of parameters which is not intuitive
