@@ -114,7 +114,8 @@ class SmallMoleculeProject:
         self.cage.ds = np.interp(self.data.q, self.cage.q, self.solvent.ds_orig)
 
     def _prepare_model(self):
-        pars = self.solute.list_pars(return_labels=True)
+        par_labels, par_vals0 = self.solute.list_pars(return_labels=True)
+
 
 
 
@@ -166,7 +167,7 @@ class Metadata:
     def read_more(self, more):
         for pair in more:
             key, value = pair
-            self.__setattr__(self, key, value)
+            self.__setattr__(key, value)
 
 
     def estimate_esf(self):
@@ -203,29 +204,6 @@ class Solute:
             return input
 
 
-    # def signal(self, q, pars=None):
-    #     # pars is a list for BOTH excited state (first) and ground state (second)
-    #    if pars is None:
-    #        pars_es, pars_gs = None, None
-
-    # def s(self, q, pars=None, target='mol_es'):
-    #     '''
-    #     Computes the signal for es/gs molecule using provided parameters and a q-grid
-    #     '''
-    #     if target == 'mol_es':
-    #         if self.mol_es is not None:
-    #             self.mol_es.transform(pars)
-    #             return scatsim.Debye(q, self.mol_es)
-    #         else:
-    #             return np.zeros(q.shape)
-    #     elif target == 'mol_gs':
-    #         if self.mol_gs is not None:
-    #             self.mol_gs.transform(pars)
-    #             return scatsim.Debye(q, self.mol_gs)
-    #         else:
-    #             return np.zeros(q.shape)
-    #     else:
-    #         print("No signal is calculated as no target is specified. None returned.")
 
     def ds(self, q, pars=None):
         '''
@@ -241,7 +219,7 @@ class Solute:
 
     def list_pars(self, return_labels=False):
         # Because we pass to signal() a list of parameters which is not intuitive
-        labels = []
+        labels, standard_values = [], []
         print(f'Listing structural parameters: \n'
               f'There are {self.n_par_total} structural parameters to be passed '
               f'to the pars argument as a list for ds method\n')
@@ -250,12 +228,14 @@ class Solute:
             self.mol_es._associated_transformation[i].describe()
             print("")
             labels.append(f'par_es+{ i +1}')
+            standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
         for i in np.arange(self.mol_gs.n_par):
             print(f'Parameter { i + 1 +self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
             self.mol_gs._associated_transformation[i].describe()
             print("")
             labels.append(f'par_gs+{i + 1}')
-        if return_labels: return labels
+            standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
+        if return_labels: return labels, standard_values
 
 
 
@@ -264,12 +244,22 @@ class Solute:
 
 class Solvent:
 
-    def __init__(self, q, dsdt, dsdr, sigma=None, K=None):
-        self.q = q
-        self.dsdt_orig = dsdt
-        self.dsdr_orig = dsdr
+    def __init__(self, input, sigma=None, K=None):
+        self.q, self.dsdt_orig, self.dsdr_orig = self.parse_input(input)
         self.C = read_sigma(sigma)
         self.K = K
+
+    def parse_input(self, input):
+        if type(input) == tuple:
+            q, dsdt_orig, dsdr_orig = input
+        elif type(input) == str:
+            data = np.genfromtxt(input)
+            q = data[:, 0]
+            dsdt_orig = data[:, 1]
+            dsdr_orig = data[:, 2]
+        else:
+            raise ValueError('input should a tuple with (q, dsdt, dsdr) elements or a filepath to the file with 3 columns')
+        return q, dsdt_orig, dsdr_orig
 
 
     def smooth(self):
@@ -279,10 +269,21 @@ class Solvent:
 
 class Cage:
 
-    def __init__(self, q, ds, sigma=None):
-        self.q = q
-        self.ds = ds
+    def __init__(self, input, sigma=None):
+        self.q, self.ds = self.parse_input(input)
         self.C = read_sigma(sigma)
+
+    def parse_input(self, input):
+        if type(input) == tuple:
+            q, ds = input
+        elif type(input) == str:
+            data = np.genfromtxt(input)
+            q = data[:, 0]
+            ds = data[:, 1]
+        else:
+            raise ValueError('input should a tuple with (q, ds) elements or a filepath to the file with 2 columns')
+        return q, ds
+
 
 
 

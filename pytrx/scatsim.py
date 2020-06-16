@@ -89,7 +89,7 @@ class Molecule:
             self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
 
             assert (len(par) == len(self._associated_transformation)), \
-                "Number of parameters not matching transformations"
+                "Number of parameters not matching number of transformations"
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
                 if reprep:
