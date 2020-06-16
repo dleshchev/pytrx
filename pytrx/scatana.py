@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
+import lmfit
 
 
 ## TODO:
@@ -111,15 +112,21 @@ class SmallMoleculeProject:
     def add_cage(self, cage_instance):
         # TODO: actual interpolation operator with uncertainty propagation
         self.cage = cage_instance
-        self.cage.ds = np.interp(self.data.q, self.cage.q, self.solvent.ds_orig)
+        self.cage.ds = np.interp(self.data.q, self.cage.q, self.cage.ds_orig)
 
-    def _prepare_model(self):
+    def _prepare_model(self, esf=0):
+        pars = lmfit.Parameters()
         par_labels, par_vals0 = self.solute.list_pars(return_labels=True)
+        for lab, val in zip(par_labels, par_vals0):
+            pars.add(lab, value=val)
+        pars.add('esf', value=0)
+        pars.add('cage_amplitude', value=0)
+        pars.add('dT', value=0)
+        pars.add('drho', value=0)
+        pars.pretty_print()
 
 
-
-
-    def fit(self, p0, method='gls'):
+    def fit(self, qmin=None, qmax=None, tmin=None, tmax=None, tavrg=True, p0=None, method='gls'):
         pass
 
 
@@ -227,13 +234,13 @@ class Solute:
             print(f'Parameter { i +1}: ES, {type(self.mol_es._associated_transformation[i])}')
             self.mol_es._associated_transformation[i].describe()
             print("")
-            labels.append(f'par_es+{ i +1}')
+            labels.append(f'par_es_{ i +1}')
             standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
         for i in np.arange(self.mol_gs.n_par):
             print(f'Parameter { i + 1 +self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
             self.mol_gs._associated_transformation[i].describe()
             print("")
-            labels.append(f'par_gs+{i + 1}')
+            labels.append(f'par_gs_{i + 1}')
             standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
         if return_labels: return labels, standard_values
 
@@ -270,7 +277,7 @@ class Solvent:
 class Cage:
 
     def __init__(self, input, sigma=None):
-        self.q, self.ds = self.parse_input(input)
+        self.q, self.ds_orig = self.parse_input(input)
         self.C = read_sigma(sigma)
 
     def parse_input(self, input):
