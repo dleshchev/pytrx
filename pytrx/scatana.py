@@ -47,6 +47,9 @@ class SmallMoleculeProject:
             self.data = input_data
 
         self.metadata = Metadata(**kwargs)
+        self.solute = None
+        self.solvent = None
+        self.cage = None
 
 
     def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
@@ -97,18 +100,22 @@ class SmallMoleculeProject:
 
         self.solute = solute_instance
 
-        # self.ds_solute = np.zeros(q.size, len(candidate_list))
-        # self.ds_labels = np.array([i.label for i in candidate_list])
-        # for i, candidate in enumerate(candidate_list):
-        #     self.ds_solute[:, i] = (scatsim.Debye(q, candidate.mol_es) - scatsim.Debye(q, candidate.mol_gs))/R
-
 
     def add_solvent(self, solvent_instance):
         self.solvent = solvent_instance
+        # TODO: actual interpolation operator with uncertainty propagation
+        self.solvent.dsdt = np.interp(self.data.q, self.solvent.q, self.solvent.dsdt_orig)
+        self.solvent.dsdr = np.interp(self.data.q, self.solvent.q, self.solvent.dsdr_orig)
 
 
     def add_cage(self, cage_instance):
+        # TODO: actual interpolation operator with uncertainty propagation
         self.cage = cage_instance
+        self.cage.ds = np.interp(self.data.q, self.cage.q, self.solvent.ds_orig)
+
+    def _prepare_model(self):
+        pars = self.solute.list_pars(return_labels=True)
+
 
 
     def fit(self, p0, method='gls'):
@@ -201,24 +208,24 @@ class Solute:
     #    if pars is None:
     #        pars_es, pars_gs = None, None
 
-    def s(self, q, pars=None, target='mol_es'):
-        '''
-        Computes the signal for es/gs molecule using provided parameters and a q-grid
-        '''
-        if target == 'mol_es':
-            if self.mol_es is not None:
-                self.mol_es.transform(pars)
-                return scatsim.Debye(q, self.mol_es)
-            else:
-                return np.zeros(q.shape)
-        elif target == 'mol_gs':
-            if self.mol_gs is not None:
-                self.mol_gs.transform(pars)
-                return scatsim.Debye(q, self.mol_gs)
-            else:
-                return np.zeros(q.shape)
-        else:
-            print("No signal is calculated as no target is specified. None returned.")
+    # def s(self, q, pars=None, target='mol_es'):
+    #     '''
+    #     Computes the signal for es/gs molecule using provided parameters and a q-grid
+    #     '''
+    #     if target == 'mol_es':
+    #         if self.mol_es is not None:
+    #             self.mol_es.transform(pars)
+    #             return scatsim.Debye(q, self.mol_es)
+    #         else:
+    #             return np.zeros(q.shape)
+    #     elif target == 'mol_gs':
+    #         if self.mol_gs is not None:
+    #             self.mol_gs.transform(pars)
+    #             return scatsim.Debye(q, self.mol_gs)
+    #         else:
+    #             return np.zeros(q.shape)
+    #     else:
+    #         print("No signal is calculated as no target is specified. None returned.")
 
     def ds(self, q, pars=None):
         '''
@@ -229,51 +236,24 @@ class Solute:
         print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
         return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
 
-    def list_pars(self):
+    def list_pars(self, return_labels=False):
         # Because we pass to signal() a list of parameters which is not intuitive
-        print(f'Listing parameters: \n'
-              f'There are {self.n_par_total} parameters to be passed '
+        labels = []
+        print(f'Listing structural parameters: \n'
+              f'There are {self.n_par_total} structural parameters to be passed '
               f'to the pars argument as a list for ds method\n')
         for i in np.arange(self.mol_es.n_par):
             print(f'Parameter { i +1}: ES, {type(self.mol_es._associated_transformation[i])}')
             self.mol_es._associated_transformation[i].describe()
             print("")
+            labels.append(f'par_es+{ i +1}')
         for i in np.arange(self.mol_gs.n_par):
             print(f'Parameter { i + 1 +self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
             self.mol_gs._associated_transformation[i].describe()
             print("")
-        # if target == 'mol_es':
-        #     return scatsim.Debye(q, self.mol_es)
-        # elif target == 'mol_gs':
-        #     return scatsim.Debye(q, self.mol_gs)
-        # else:
-        #     print("No signal is calculated as no target is specified. None returned.")
+            labels.append(f'par_gs+{i + 1}')
+        if return_labels: return labels
 
-
-    # def ds(self, q, pars):
-    #     '''
-    #     Originally just 'signal' but changed to 'ds' as this is calculating difference signal
-    #     '''
-    #     # self.mol_es.move(*x) - consider this
-    #     pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
-    #     print(pars_es, pars_gs)
-    #     return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
-
-
-            # scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
-    #
-    # def transform(self, target, par=None):
-    #     '''
-    #         Interface function
-    #     '''
-    #     if par is not None:
-    #         if target == 'mol_es':
-    #             self.mol_es = self.mol_es.transform(par=par)
-    #         if target == 'mol_gs':
-    #             self.mol_gs = self.mol_gs.transform(par=par)
-    #     else:
-    #         print("No moves supplied. No transformation happened.")
-    #     return self
 
 
 
@@ -283,8 +263,8 @@ class Solvent:
 
     def __init__(self, q, dsdt, dsdr, sigma=None, K=None):
         self.q = q
-        self.dsdt = dsdt
-        self.dsdr = dsdr
+        self.dsdt_orig = dsdt
+        self.dsdr_orig = dsdr
         self.C = read_sigma(sigma)
         self.K = K
 
@@ -296,9 +276,9 @@ class Solvent:
 
 class Cage:
 
-    def __init__(self, q, ds_cage, sigma=None):
+    def __init__(self, q, ds, sigma=None):
         self.q = q
-        self.ds_cage = ds_cage
+        self.ds = ds
         self.C = read_sigma(sigma)
 
 

@@ -98,6 +98,11 @@ class Molecule:
                 self.xyz = t.transform(self.xyz, p)
         return self
 
+    def s(self, q, pars=None):
+        self.transform(pars)
+        return Debye(q, self)
+
+
     def clash(self):
         # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
         pass
