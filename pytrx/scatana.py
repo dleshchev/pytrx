@@ -232,6 +232,9 @@ class Solute:
         Originally just 'signal' but changed to 'ds' as this is calculating difference signal
         '''
         # self.mol_es.move(*x) - consider this
+        if pars is not None:
+            assert len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
+                'nummber of parameteres should match the sum of numbers of parameters for gs and es'
         pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
         print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
         return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
