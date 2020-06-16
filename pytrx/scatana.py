@@ -114,26 +114,39 @@ class SmallMoleculeProject:
         self.cage = cage_instance
         self.cage.ds = np.interp(self.data.q, self.cage.q, self.cage.ds_orig)
 
-    def _prepare_model(self, esf=0):
-        pars = lmfit.Parameters()
-        par_labels, par_vals0 = self.solute.list_pars(return_labels=True)
-        for lab, val in zip(par_labels, par_vals0):
-            pars.add(lab, value=val)
-        pars.add('esf', value=0)
-        pars.add('cage_amplitude', value=0)
-        pars.add('dT', value=0)
-        pars.add('drho', value=0)
-        pars.pretty_print()
+
+
+    def prepare_parameters(self, esf=0):
+        params = lmfit.Parameters()
+        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
+            params.add(lab, value=val)
+        params.add('esf', value=esf)
+        params.add('cage_amp', value=0)
+        params.add('dT', value=0)
+        params.add('drho', value=0)
+        return params
+
+
+    def fit_func(self, params):
+        sps = self.solvent_per_solute()
+        # print(sps)
+        v = params.valuesdict()
+        pars_structural = [v[p] for p in self.solute.par_labels]
+        return (v['esf']/sps * (self.solute.ds(self.data.q, pars_structural) + v['cage_amp'] * self.cage.ds)
+                + v['dT'] * self.solvent.dsdt
+                + v['drho'] * self.solvent.dsdr)
 
 
     def fit(self, qmin=None, qmax=None, tmin=None, tmax=None, tavrg=True, p0=None, method='gls'):
-        pass
+        # out = regressors.fit(y, C, f, method=method)
+        params = self.prepare_parameters(esf=0.1)
+
 
 
     def solvent_per_solute(self):
         solvent = self.metadata.solvent
         concentration = self.metadata.concentration
-        data = hydro.data[solvent]
+        data = hydro.solvent_data[solvent]
         return data.density / data.molar_mass / concentration
 
 
@@ -198,6 +211,7 @@ class Solute:
         self.mol_es = self.parse_input(input_es)
 
         self.n_par_total = self.mol_es.n_par + self.mol_gs.n_par
+        self.par_labels, self.par_vals0 = self.list_pars(return_labels=True)
         # self.mol_es_ref = self.parse_input(input_es)
 
     def parse_input(self, input):
