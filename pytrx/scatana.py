@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
+import lmfit
 
 
 ## TODO:
@@ -47,6 +48,9 @@ class SmallMoleculeProject:
             self.data = input_data
 
         self.metadata = Metadata(**kwargs)
+        self.solute = None
+        self.solvent = None
+        self.cage = None
 
 
     def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
@@ -91,34 +95,16 @@ class SmallMoleculeProject:
             plt.xlim(q.min(), q.max())
 
 
-    def add_solute(self, solute_instance):
-        # q = self.data.q
-        # R = self.solvent_per_solute()
-
-        self.solute = solute_instance
-
-        # self.ds_solute = np.zeros(q.size, len(candidate_list))
-        # self.ds_labels = np.array([i.label for i in candidate_list])
-        # for i, candidate in enumerate(candidate_list):
-        #     self.ds_solute[:, i] = (scatsim.Debye(q, candidate.mol_es) - scatsim.Debye(q, candidate.mol_gs))/R
 
 
-    def add_solvent(self, solvent_instance):
-        self.solvent = solvent_instance
 
 
-    def add_cage(self, cage_instance):
-        self.cage = cage_instance
-
-
-    def fit(self, p0, method='gls'):
-        pass
 
 
     def solvent_per_solute(self):
         solvent = self.metadata.solvent
         concentration = self.metadata.concentration
-        data = hydro.data[solvent]
+        data = hydro.solvent_data[solvent]
         return data.density / data.molar_mass / concentration
 
 
@@ -159,7 +145,7 @@ class Metadata:
     def read_more(self, more):
         for pair in more:
             key, value = pair
-            self.__setattr__(self, key, value)
+            self.__setattr__(key, value)
 
 
     def estimate_esf(self):
@@ -183,6 +169,7 @@ class Solute:
         self.mol_es = self.parse_input(input_es)
 
         self.n_par_total = self.mol_es.n_par + self.mol_gs.n_par
+        self.par_labels, self.par_vals0 = self.list_pars(return_labels=True)
         # self.mol_es_ref = self.parse_input(input_es)
 
     def parse_input(self, input):
@@ -196,19 +183,18 @@ class Solute:
             return input
 
 
-    # def signal(self, q, pars=None):
-    #     # pars is a list for BOTH excited state (first) and ground state (second)
-    #    if pars is None:
-    #        pars_es, pars_gs = None, None
-
 
     def ds(self, q, pars=None, reprep=True):
         '''
         Originally just 'signal' but changed to 'ds' as this is calculating difference signal
         '''
         # self.mol_es.move(*x) - consider this
+        if pars is not None:
+            assert len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
+                'nummber of parameteres should match the sum of numbers of parameters for gs and es'
         pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
         print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
+
         if (self.mol_es is not None) and (self.mol_gs is not None):
             return self.mol_es.s(q, pars_es, reprep) - self.mol_gs.s(q, pars_gs, reprep)
         elif self.mol_gs is not None:
@@ -218,51 +204,26 @@ class Solute:
         else:
             return np.zeros(q.shape)
 
-    def list_pars(self):
+    def list_pars(self, return_labels=False):
         # Because we pass to signal() a list of parameters which is not intuitive
-        print(f'Listing parameters: \n'
-              f'There are {self.n_par_total} parameters to be passed '
+        labels, standard_values = [], []
+        print(f'Listing structural parameters: \n'
+              f'There are {self.n_par_total} structural parameters to be passed '
               f'to the pars argument as a list for ds method\n')
         for i in np.arange(self.mol_es.n_par):
             print(f'Parameter { i +1}: ES, {type(self.mol_es._associated_transformation[i])}')
             self.mol_es._associated_transformation[i].describe()
             print("")
+            labels.append(f'par_es_{ i +1}')
+            standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
         for i in np.arange(self.mol_gs.n_par):
             print(f'Parameter { i + 1 +self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
             self.mol_gs._associated_transformation[i].describe()
             print("")
-        # if target == 'mol_es':
-        #     return scatsim.Debye(q, self.mol_es)
-        # elif target == 'mol_gs':
-        #     return scatsim.Debye(q, self.mol_gs)
-        # else:
-        #     print("No signal is calculated as no target is specified. None returned.")
+            labels.append(f'par_gs_{i + 1}')
+            standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
+        if return_labels: return labels, standard_values
 
-
-    # def ds(self, q, pars):
-    #     '''
-    #     Originally just 'signal' but changed to 'ds' as this is calculating difference signal
-    #     '''
-    #     # self.mol_es.move(*x) - consider this
-    #     pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
-    #     print(pars_es, pars_gs)
-    #     return self.s(q, pars=pars_es, target='mol_es') - self.s(q, pars=pars_gs, target='mol_gs')
-
-
-            # scatsim.Debye(q, self.mol_es) - scatsim.Debye(q, self.mol_gs)
-    #
-    # def transform(self, target, par=None):
-    #     '''
-    #         Interface function
-    #     '''
-    #     if par is not None:
-    #         if target == 'mol_es':
-    #             self.mol_es = self.mol_es.transform(par=par)
-    #         if target == 'mol_gs':
-    #             self.mol_gs = self.mol_gs.transform(par=par)
-    #     else:
-    #         print("No moves supplied. No transformation happened.")
-    #     return self
 
 
 
@@ -270,12 +231,22 @@ class Solute:
 
 class Solvent:
 
-    def __init__(self, q, dsdt, dsdr, sigma=None, K=None):
-        self.q = q
-        self.dsdt = dsdt
-        self.dsdr = dsdr
+    def __init__(self, input, sigma=None, K=None):
+        self.q, self.dsdt_orig, self.dsdr_orig = self.parse_input(input)
         self.C = read_sigma(sigma)
         self.K = K
+
+    def parse_input(self, input):
+        if type(input) == tuple:
+            q, dsdt_orig, dsdr_orig = input
+        elif type(input) == str:
+            data = np.genfromtxt(input)
+            q = data[:, 0]
+            dsdt_orig = data[:, 1]
+            dsdr_orig = data[:, 2]
+        else:
+            raise ValueError('input should a tuple with (q, dsdt, dsdr) elements or a filepath to the file with 3 columns')
+        return q, dsdt_orig, dsdr_orig
 
 
     def smooth(self):
@@ -285,10 +256,21 @@ class Solvent:
 
 class Cage:
 
-    def __init__(self, q, ds_cage, sigma=None):
-        self.q = q
-        self.ds_cage = ds_cage
+    def __init__(self, input, sigma=None):
+        self.q, self.ds_orig = self.parse_input(input)
         self.C = read_sigma(sigma)
+
+    def parse_input(self, input):
+        if type(input) == tuple:
+            q, ds = input
+        elif type(input) == str:
+            data = np.genfromtxt(input)
+            q = data[:, 0]
+            ds = data[:, 1]
+        else:
+            raise ValueError('input should a tuple with (q, ds) elements or a filepath to the file with 2 columns')
+        return q, ds
+
 
 
 
@@ -322,3 +304,104 @@ def deal_pars(pars, n):
         if len(pars_es) == 0: pars_es = None
         if len(pars_gs) == 0: pars_gs = None
     return pars_es, pars_gs
+
+
+
+
+class SolutionScatteringModel:
+    def __init__(self, *args):
+        self.solute = None
+        self.solvent = None
+        self.cage = None
+        self.add(*args)
+
+
+    def add(self, *args):
+        for arg in args:
+            self._add_item(arg)
+
+
+    def _add_item(self, item):
+        if type(item) == Solute:
+            self.solute = item
+        elif type(item) == Solvent:
+            self.solvent = item
+        elif type(item) == Cage:
+            self.cage = item
+        else:
+            raise TypeError ('invalid input type. Must be Solute, Solvent, or Cage')
+
+
+    # def fit(self, qmin=None, qmax=None, tmin=None, tmax=None, tavrg=True, p0=None, method='gls'):
+    def fit(self, q, ds_exp, C, sps, method='gls'):
+        # out = regressors.fit(Y, C, K, f, method=method) <- actually use this
+        q = self.ensure_qrange(q)
+        self.prepare_model(q)
+        params0 = self.prepare_parameters()
+        if method == 'ols':
+            L = np.sqrt(np.diag(np.diag(C)))
+        else:
+            L = np.linalg.cholesky(C)
+
+
+        def residual(params, q, y, L, sps):
+            return L @ (self.fit_func(params, q, sps) - y)
+
+        out = lmfit.minimize(residual, params0, args=(q, ds_exp, L, sps))
+        return out
+
+
+    def fit_func(self, params, q, sps): # need to add q argument
+        v = params.valuesdict()
+        pars_structural = [v[p] for p in self.solute.par_labels]
+        return (v['esf']/sps * self.solute.ds(q, pars_structural)
+                + v['cage_amp']/sps * self.cage.ds
+                + v['dsdt_amp'] * self.solvent.dsdt
+                + v['dsdr_amp'] * self.solvent.dsdr)
+
+
+    def ensure_qrange(self, q_in):
+
+        q_out = q_in.copy()
+        qmin = np.max((q_in.min(), self.solvent.q.min(), self.cage.q.min()))
+        qmax = np.min((q_in.max(), self.solvent.q.max(), self.cage.q.max()))
+
+        if qmin >= q_in.min():
+            print('invalid qmin: will perform fit above provided qmin based on the model/data')
+
+        if qmax < q_in.max():
+            print('invalid qmax: will perform fit below provided qmax based on the model/data')
+
+        return q_out[(q_out>=qmin) & (q_out<=qmax)]
+
+
+    def prepare_parameters(self, esf=0):
+        params = lmfit.Parameters()
+        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
+            params.add(lab, value=val)
+        params.add('esf', value=esf)
+        params.add('cage_amp', value=0)
+        params.add('dsdt_amp', value=0)
+        params.add('dsdr_amp', value=0)
+        return params
+
+
+    def prepare_model(self, qfit):
+        # TODO: actual interpolation operator with uncertainty propagation
+        # qmin, qmax = self._check_qrange(qmin, qmax)
+        self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
+        self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
+        self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -272,6 +272,26 @@ class GLS_lin:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def gls_fit(y, C, f_nl, H, x0, printing=False):
 
     '''

@@ -90,11 +90,16 @@ class Molecule:
             self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
 
             assert (len(par) == len(self._associated_transformation)), \
-                "Number of parameters not matching transformations"
+                "Number of parameters not matching number of transformations"
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
                 self.xyz = t.transform(self.xyz, self.Z_num, p)
         return self
+
+    def s(self, q, pars=None):
+        self.transform(pars)
+        return Debye(q, self)
+
 
     def clash(self):
         # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
