@@ -77,7 +77,7 @@ class Molecule:
         self.gr.calcDens()
         self.dens = self.gr.dens
 
-    def transform(self, par=None, reprep=True):
+    def transform(self, par=None):
         '''
         Transforms xyz based on the transformation supplied in the _associated_transformation.
         Also takes the par which should be either None or a list that is the same length as the
@@ -95,7 +95,6 @@ class Molecule:
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
                 self.xyz = t.transform(self.xyz, self.Z_num, p)
-        return self
 
     def s(self, q, pars=None):
         self.transform(pars)
@@ -106,10 +105,6 @@ class Molecule:
         # Check for clash by whether min distances between two atom types are shorter than 80 % of original (tentative)
         pass
 
-    def s(self, q, pars=None, reprep=True):
-        if pars is not None:
-            self.transform(pars, reprep)
-        return Debye(q, self)
 
     # def sum_parameters(self):
     #     if self._associated_transformation is not None:
