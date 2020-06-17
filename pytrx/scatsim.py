@@ -41,7 +41,7 @@ class Molecule:
             print("associated_transformation is a list. Examining elements...")
             for t in associated_transformation:
                 print(f'Checking {t}')
-                #print(f'{type(t)}')
+                # print(f'{type(t)}')
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
@@ -58,9 +58,10 @@ class Molecule:
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
-    def calcDistMat(self):
+    def calcDistMat(self, return_mat=False):
         self.dist_mat = np.sqrt(np.sum((self.xyz[None, :, :] -
                                         self.xyz[:, None, :]) ** 2, axis=2))
+        if return_mat: return self.dist_mat
 
     def calcGR(self, rmin=0, rmax=25, dr=0.01):
         self.calcDistMat()

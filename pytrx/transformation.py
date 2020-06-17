@@ -51,7 +51,7 @@ class Transformation_move_vector(Transformation):
         # return self
 
     def describe(self):
-        print("  Moving group1 along a predefined vector. Both groups move.")
+        print("  Moving group1 along a predefined vector.")
         print(f'    Group 1: {self.group1}')
         print(f'    Vector : {self.unit_vector}')
 
@@ -61,6 +61,43 @@ class Transformation_move_vector(Transformation):
         if self.reprep:
             self.prepare(xyz, Z_num)
         xyz[self.group1] += self.unit_vector * amplitude
+        return xyz
+
+class Transformation_group_vector(Transformation):
+    # Move a group of atoms along a vector that is constructed by the center of coordinates of two other groups.
+    # Vector will be from vector_group 1 to vector_group 2
+    def __init__(self, group1, vector_groups, amplitude0=0, reprep=True):
+        super().__init__()
+        self.group1 = np.array(group1)
+        self.vector_groups = vector_groups
+        self.amplitude0 = amplitude0
+        self.reprep = reprep
+
+    def prepare(self, xyz, Z_num):
+        assert (np.max(self.group1) <= len(xyz)), \
+            "Index out of bound: largest index of group 1 > length of supplied molecule"
+        assert (np.max(self.vector_groups[0]) <= len(xyz)), \
+            "Index out of bound: largest index of group 1 > length of supplied molecule"
+        assert (np.max(self.vector_groups[1]) <= len(xyz)), \
+            "Index out of bound: largest index of group 1 > length of supplied molecule"
+        self.vector = np.mean(xyz[self.vector_groups[1]], 0) - np.mean(xyz[self.vector_groups[0]], 0)
+        self.unit_vector = np.array(self.vector) / np.linalg.norm(self.vector)
+
+        # return self
+
+    def describe(self):
+        print("  Moving group1 along a vector constructed by two other groups (mean of coordinates).")
+        print("  Vector will be from vector_group 1 to vector_group 2")
+        print(f'    Group 1: {self.group1}')
+        print(f'    Vector_group 1: {self.vector_groups[0]}')
+        print(f'    Vector_group 2: {self.vector_groups[1]}')
+
+    def transform(self, xyz, Z_num, amplitude=None):
+        if amplitude is None:
+            amplitude = self.amplitude0
+        if self.reprep:
+            self.prepare(xyz, Z_num)
+        xyz[self.group1] -= self.unit_vector * amplitude
         return xyz
 
 
