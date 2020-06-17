@@ -95,51 +95,9 @@ class SmallMoleculeProject:
             plt.xlim(q.min(), q.max())
 
 
-    def add_solute(self, solute_instance):
-        # q = self.data.q
-        # R = self.solvent_per_solute()
-
-        self.solute = solute_instance
-
-
-    def add_solvent(self, solvent_instance):
-        self.solvent = solvent_instance
-        # TODO: actual interpolation operator with uncertainty propagation
-        self.solvent.dsdt = np.interp(self.data.q, self.solvent.q, self.solvent.dsdt_orig)
-        self.solvent.dsdr = np.interp(self.data.q, self.solvent.q, self.solvent.dsdr_orig)
-
-
-    def add_cage(self, cage_instance):
-        # TODO: actual interpolation operator with uncertainty propagation
-        self.cage = cage_instance
-        self.cage.ds = np.interp(self.data.q, self.cage.q, self.cage.ds_orig)
 
 
 
-    def prepare_parameters(self, esf=0):
-        params = lmfit.Parameters()
-        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
-            params.add(lab, value=val)
-        params.add('esf', value=esf)
-        params.add('cage_amp', value=0)
-        params.add('dT', value=0)
-        params.add('drho', value=0)
-        return params
-
-
-    def fit_func(self, params):
-        sps = self.solvent_per_solute()
-        # print(sps)
-        v = params.valuesdict()
-        pars_structural = [v[p] for p in self.solute.par_labels]
-        return (v['esf']/sps * (self.solute.ds(self.data.q, pars_structural) + v['cage_amp'] * self.cage.ds)
-                + v['dT'] * self.solvent.dsdt
-                + v['drho'] * self.solvent.dsdr)
-
-
-    def fit(self, qmin=None, qmax=None, tmin=None, tmax=None, tavrg=True, p0=None, method='gls'):
-        # out = regressors.fit(y, C, f, method=method)
-        params = self.prepare_parameters(esf=0.1)
 
 
 
@@ -338,3 +296,104 @@ def deal_pars(pars, n):
         if len(pars_es) == 0: pars_es = None
         if len(pars_gs) == 0: pars_gs = None
     return pars_es, pars_gs
+
+
+
+
+class SolutionScatteringModel:
+    def __init__(self, *args):
+        self.solute = None
+        self.solvent = None
+        self.cage = None
+        self.add(*args)
+
+
+    def add(self, *args):
+        for arg in args:
+            self._add_item(arg)
+
+
+    def _add_item(self, item):
+        if type(item) == Solute:
+            self.solute = item
+        elif type(item) == Solvent:
+            self.solvent = item
+        elif type(item) == Cage:
+            self.cage = item
+        else:
+            raise TypeError ('invalid input type. Must be Solute, Solvent, or Cage')
+
+
+    # def fit(self, qmin=None, qmax=None, tmin=None, tmax=None, tavrg=True, p0=None, method='gls'):
+    def fit(self, q, ds_exp, C, sps, method='gls'):
+        # out = regressors.fit(Y, C, K, f, method=method) <- actually use this
+        q = self.ensure_qrange(q)
+        self.prepare_model(q)
+        params0 = self.prepare_parameters()
+        if method == 'ols':
+            L = np.sqrt(np.diag(np.diag(C)))
+        else:
+            L = np.linalg.cholesky(C)
+
+
+        def residual(params, q, y, L, sps):
+            return L @ (self.fit_func(params, q, sps) - y)
+
+        out = lmfit.minimize(residual, params0, args=(q, ds_exp, L, sps))
+        return out
+
+
+    def fit_func(self, params, q, sps): # need to add q argument
+        v = params.valuesdict()
+        pars_structural = [v[p] for p in self.solute.par_labels]
+        return (v['esf']/sps * self.solute.ds(q, pars_structural)
+                + v['cage_amp']/sps * self.cage.ds
+                + v['dsdt_amp'] * self.solvent.dsdt
+                + v['dsdr_amp'] * self.solvent.dsdr)
+
+
+    def ensure_qrange(self, q_in):
+
+        q_out = q_in.copy()
+        qmin = np.max((q_in.min(), self.solvent.q.min(), self.cage.q.min()))
+        qmax = np.min((q_in.max(), self.solvent.q.max(), self.cage.q.max()))
+
+        if qmin >= q_in.min():
+            print('invalid qmin: will perform fit above provided qmin based on the model/data')
+
+        if qmax < q_in.max():
+            print('invalid qmax: will perform fit below provided qmax based on the model/data')
+
+        return q_out[(q_out>=qmin) & (q_out<=qmax)]
+
+
+    def prepare_parameters(self, esf=0):
+        params = lmfit.Parameters()
+        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
+            params.add(lab, value=val)
+        params.add('esf', value=esf)
+        params.add('cage_amp', value=0)
+        params.add('dsdt_amp', value=0)
+        params.add('dsdr_amp', value=0)
+        return params
+
+
+    def prepare_model(self, qfit):
+        # TODO: actual interpolation operator with uncertainty propagation
+        # qmin, qmax = self._check_qrange(qmin, qmax)
+        self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
+        self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
+        self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
+
+
+
+
+
+
+
+
+
+
+
+
+
