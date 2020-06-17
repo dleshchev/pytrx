@@ -184,7 +184,7 @@ class Solute:
 
 
 
-    def ds(self, q, pars=None):
+    def ds(self, q, pars=None, reprep=True):
         '''
         Originally just 'signal' but changed to 'ds' as this is calculating difference signal
         '''
@@ -194,7 +194,15 @@ class Solute:
                 'nummber of parameteres should match the sum of numbers of parameters for gs and es'
         pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
         print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
-        return self.mol_es.s(q, pars=pars_es) - self.mol_gs.s(q, pars=pars_gs)
+
+        if (self.mol_es is not None) and (self.mol_gs is not None):
+            return self.mol_es.s(q, pars_es, reprep) - self.mol_gs.s(q, pars_gs, reprep)
+        elif self.mol_gs is not None:
+            return - self.mol_gs.s(q, pars_gs, reprep)
+        elif self.mol_es is not None:
+            return self.mol_es.s(q, pars_es, reprep)
+        else:
+            return np.zeros(q.shape)
 
     def list_pars(self, return_labels=False):
         # Because we pass to signal() a list of parameters which is not intuitive

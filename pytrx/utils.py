@@ -8,6 +8,7 @@ Created on Wed Mar 25 21:10:16 2020
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import solveh_banded
+from pytrx.transformation import *
 
 
 
@@ -217,6 +218,55 @@ def vdWradius():
                        1600, 1600, 1600, 1600, 1600, 1600],
                       dtype=np.float32) / 1000.0
     return vdWradii
+
+
+def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False):
+    dist_mat = mol.calcDistMat(return_mat=True)
+    dist_thres = (vdWradius()[mol.Z_num][:, None] + vdWradius()[mol.Z_num]) * scaling * scaling
+
+    bonds = dist_thres > dist_mat
+    bonds_pair = []
+    for i in range(len(mol.Z_num)):
+        for j in range(i + 1, len(mol.Z_num)):
+            if bonds[i, j]:
+                bonds_pair.append([i, j])
+    bonds_pair = np.array(bonds_pair)
+    print(mol)
+
+    # mol = c.mol_es
+    fig = plt.figure(fignum)
+    if not overlay:
+        plt.clf()
+    ax = fig.add_subplot(111, projection='3d', proj_type='ortho')
+    ax.view_init(elev=60, azim=60)
+    ax.set_facecolor((0, 0, 0))
+    plt.xlim((np.min(mol.xyz_ref[:, 0]), np.max(mol.xyz_ref[:, 0])))
+    plt.ylim((np.min(mol.xyz_ref[:, 1]), np.max(mol.xyz_ref[:, 1])))
+    ax.set_zlim(np.min(mol.xyz_ref[:, 2]), np.max(mol.xyz_ref[:, 2]))
+    ax.scatter(mol.xyz[:, 0], mol.xyz[:, 1], mol.xyz[:, 2],
+               s=vdWradius()[mol.Z_num] * 15,
+               c=AtomColor()[mol.Z_num])
+    plt.axis('off')
+    for row in bonds_pair:
+        ax.plot([mol.xyz[row[0], 0], mol.xyz[row[1], 0]],
+                [mol.xyz[row[0], 1], mol.xyz[row[1], 1]],
+                [mol.xyz[row[0], 2], mol.xyz[row[1], 2]],
+                c=(0.5, 0.5, 0.5),
+                linewidth=1)
+    if draw_par: # For testing, don't use
+        for t in mol._associated_transformation:
+            if issubclass(type(t), Transformation_distance):
+                G2_mean = t.group2_mean
+                G1_mean = t.group1_mean
+                # axis = mol._associated_transformation[1].axis
+                ax.quiver(G1_mean[0], G1_mean[1], G1_mean[2],
+                          G2_mean[0] - G1_mean[0],
+                          G2_mean[1] - G1_mean[1],
+                          G2_mean[2] - G1_mean[2],
+                          color='r', linewidth=2)
+
+
+
 #     def applyPolyCorrection(self, q_poly, E, I, E_eff='auto'):
 #         self.s_poly = self._PolyCorrection(self.q, self.s, q_poly, E, I, E_eff=E_eff)
 #         self.polyFlag = True
