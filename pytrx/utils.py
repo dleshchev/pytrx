@@ -8,7 +8,7 @@ Created on Wed Mar 25 21:10:16 2020
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import solveh_banded
-from pytrx.transformation import *
+# from pytrx.transformation import *
 
 
 
