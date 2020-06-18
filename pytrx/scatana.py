@@ -34,7 +34,7 @@ import lmfit
 
 class SmallMoleculeProject:
 
-    def __init__(self, input_data, **kwargs):
+    def __init__(self, input_data, input_model, **kwargs):
         '''
         Args:
             input_data - .h5 file created using ScatData.save method
@@ -49,10 +49,9 @@ class SmallMoleculeProject:
         else:
             raise ValueError('input_data must be a path to a the h5 file or a ScatData object')
 
+        self.model = input_model
+
         self.metadata = Metadata(**kwargs)
-        self.solute = None
-        self.solvent = None
-        self.cage = None
 
 
     def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
@@ -103,17 +102,56 @@ class SmallMoleculeProject:
         data = hydro.solvent_data[solvent]
         return data.density / data.molar_mass / concentration
 
-    # def fit(self, qmin=None, qmax=None, t=None, tmin=None, tmax=None, tavrg=False, method='gls'):
-    #     q_sel = (self.data.q >= qmin) & (self.data.q <= qmax)
-    #     qfit = self.data.q[q_sel]
-    #     if (t is None) and (tmin is None) and (tmax is None):
-    #         raise ValueError('provide valid t or a t-range based on tmin and tmax keywords')
-    #     else:
-    #         if (t is not None) and (t == 'all'):
-    #             idx_target = np.where(self.data.t_str == t)
-    #             ds_target = self.data.diff.ds_av[:, idx_target]
-    #         elif t == 'all':
-    #             ds_target = self.data.diff.ds_av
+    def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls'):
+        if qmin is None: qmin = self.data.q.min()
+        if qmax is None: qmax = self.data.q.max()
+
+        # TODO t and trange should be strings or numbers
+        # covqq usually comes not full rank coz some of the q valus are 0, one must check it and do proper qfit defitiion so that C is (check diag(C)==0)
+
+        if t is None:
+            t = 'all'
+
+        if t == 'all':
+            t_idx = np.ones(self.data.t.size, dtype=bool)
+
+        if trange is not None:
+            t_idx = (self.data.t>=trange[0]) & (self.data.t<=trange[1])
+
+        if type(t) == list:
+            t_idx = np.zeros(self.data.t.size, dtype=bool)
+            for each_t in t:
+                t_idx += self.data.t == t
+
+
+        q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
+        qfit = self.data.q[q_idx]
+
+        ds_target = self.data.diff.s_av[np.ix_(q_idx, t_idx)]
+
+        C_target = self.data.diff.covqq[np.ix_(q_idx, q_idx)]
+        K_target = self.data.diff.covtt[np.ix_(t_idx, t_idx)]
+
+        if tavrg:
+            # TODO weighted averaging instead of the dumb one
+            A = np.ones(np.sum(t_idx))/np.sum(t_idx)
+            ds_target = (ds_target @ A)[:, None]
+            K_target = (A @ K_target @ A.T)[None, None]
+
+        n_curves = ds_target.shape[1]
+        output = []
+
+        for i in range(n_curves):
+            output.append(self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i], self.solvent_per_solute()))
+        return output
+        # return ds_target, C_target, K_target
+
+
+### output[i] = model.fit(ds_target[:, i], bla bla bla)
+###TODO: output__class['esf'] <-- best fit values
+
+
+
 
 
 
@@ -325,12 +363,17 @@ _dsdt_dict = {'value' : 0, 'vary' : True}
 _dsdr_dict = {'value' : 0, 'vary' : True}
 
 
+
+
+
+
 class SolutionScatteringModel:
     def __init__(self, *args,
                  esf_dict=_esf_dict,
                  cage_dict=_cage_dict,
                  dsdt_dict=_dsdt_dict,
-                 dsdr_dict=_dsdr_dict):
+                 dsdr_dict=_dsdr_dict,
+                 **kwargs):
         self.solute = None
         self.solvent = None
         self.cage = None
@@ -338,7 +381,8 @@ class SolutionScatteringModel:
         self.prepare_parameters(esf_dict=esf_dict,
                                 cage_dict=cage_dict,
                                 dsdt_dict=dsdt_dict,
-                                dsdr_dict=dsdr_dict)
+                                dsdr_dict=dsdr_dict,
+                                **kwargs)
 
 
     def add(self, *args):
@@ -363,7 +407,7 @@ class SolutionScatteringModel:
         q = self.ensure_qrange(q)
         self.prepare_vectors(q)
 
-        if method == 'ols':
+        if method == 'wls':
             L = np.sqrt(np.diag(np.diag(C)))
         else:
             L = np.linalg.cholesky(np.linalg.inv(C))
@@ -423,7 +467,8 @@ class SolutionScatteringModel:
                            esf_dict={ 'value' : 0, 'vary' : True},
                            cage_dict={'value' : 1, 'vary' : False},
                            dsdt_dict={'value' : 0, 'vary' : True},
-                           dsdr_dict={'value' : 0, 'vary' : True}):
+                           dsdr_dict={'value' : 0, 'vary' : True},
+                           **kwargs):
         # TODO: actual interpolation operator with uncertainty propagation
 
         params0 = lmfit.Parameters()
@@ -458,7 +503,16 @@ class SolutionScatteringModel:
             else:
                 params0.add('dsdr_amp', **dsdr_dict)
 
+        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
+            print((lab+'_dict'), kwargs.keys(), (lab+'_dict') in kwargs.keys())
+            if (lab+'_dict') in list(kwargs.keys()):
+                params0.add(lab, **kwargs[lab + '_dict'])
+            else:
+                params0.add(lab, value=val)
+
         self.params0 = params0
+
+
 
 
 

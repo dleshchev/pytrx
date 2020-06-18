@@ -78,6 +78,7 @@ class Molecule:
         self.dens = self.gr.dens
 
     def transform(self, par=None):
+
         '''
         Transforms xyz based on the transformation supplied in the _associated_transformation.
         Also takes the par which should be either None or a list that is the same length as the
@@ -98,6 +99,7 @@ class Molecule:
 
     def s(self, q, pars=None):
         self.transform(pars)
+        # TODO: compute form-factors and store them in Molecule and pass them to Debye
         return Debye(q, self)
 
 
