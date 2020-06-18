@@ -852,13 +852,18 @@ class IntensityContainer:
                  timeStamp=None, timeStamp_str=None, scanStamp=None):
         self.s_raw = s_raw
         self.s = s
-        self.ds = s
+        # self.ds = s
+
         self.s_av = s_av
-        self.ds_av = s_av
+        # self.ds_av = s_av
+
         self.s_err = s_err
+        # self.ds_err = s_err
+
         self.s2 = s2  # DJH 20/05/29, for adding anisotropic intensity
         self.s2_av = s2_av
         self.s2_err = s2_err
+
         self.normInt = normInt
         self.covii = covii
         self.covqq = covqq
@@ -1179,8 +1184,8 @@ def distribute_Mat2ScatData(matfile):
     data.q = matdata['data']['q'][0][0].squeeze()
     data.t = matdata['data']['t'][0][0].squeeze()
     data.t_str = np.array([time_num2str(i * 1e-12) for i in data.t])
-    data.diff.s = matdata['data']['ds0'][0][0]
-    data.diff.ds = np.copy(data.diff.s)  # Allow both s and ds be used
+    data.diff.s_av = matdata['data']['ds0'][0][0]
+    # data.diff.s = np.copy(data.diff.s)  # Allow both s and ds be used
     data.diff.s2 = matdata['data']['ds2'][0][0]
     data.diff.covqq = matdata['data']['ds0_covqq'][0][0]
     data.diff.covtt = matdata['data']['covtt'][0][0]
