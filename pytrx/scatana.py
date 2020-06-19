@@ -104,12 +104,15 @@ class SmallMoleculeProject:
         return data.density / data.molar_mass / concentration
 
     def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls'):
+
+        # check q-range
         if qmin is None: qmin = self.data.q.min()
         if qmax is None: qmax = self.data.q.max()
-
+        q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
+        q_idx = check_range_with_cov_matrix(self.data.q, q_idx, self.data.diff.covqq)
         # TODO t and trange should be strings or numbers
-        # covqq usually comes not full rank coz some of the q valus are 0, one must check it and do proper qfit defitiion so that C is (check diag(C)==0)
 
+        # check t-range
         if t is None:
             t = 'all'
 
@@ -123,11 +126,10 @@ class SmallMoleculeProject:
             t_idx = np.zeros(self.data.t.size, dtype=bool)
             for each_t in t:
                 t_idx += self.data.t == t
+        t_idx = check_range_with_cov_matrix(self.data.t, t_idx, self.data.diff.covtt)
 
-
-        q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
+        # get the targets
         qfit = self.data.q[q_idx]
-
         ds_target = self.data.diff.s_av[np.ix_(q_idx, t_idx)]
 
         C_target = self.data.diff.covqq[np.ix_(q_idx, q_idx)]
@@ -158,7 +160,13 @@ class SmallMoleculeProject:
 
 
 
-
+def check_range_with_cov_matrix(x, x_range, C):
+    a, b = C.shape
+    if a == b == np.linalg.matrix_rank(C):
+        return x_range
+    else:
+        x_good = np.abs(np.diag(C)) > np.finfo(float).eps
+        return x_good & x_range
 
 
 
