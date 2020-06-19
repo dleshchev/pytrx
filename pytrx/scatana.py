@@ -103,7 +103,7 @@ class SmallMoleculeProject:
         data = hydro.solvent_data[solvent]
         return data.density / data.molar_mass / concentration
 
-    def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls'):
+    def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls', prefit=True):
 
         # check q-range
         if qmin is None: qmin = self.data.q.min()
@@ -156,7 +156,8 @@ class SmallMoleculeProject:
         output = []
 
         for i in range(n_curves):
-            output.append(self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i], self.solvent_per_solute()))
+            output.append(self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
+                                         self.solvent_per_solute(), method=method, prefit=prefit))
         return output
         # return ds_target, C_target, K_target
 
@@ -428,7 +429,7 @@ class SolutionScatteringModel:
 
 
 
-    def fit(self, q, ds_exp, C, sps, method='gls'):
+    def fit(self, q, ds_exp, C, sps, method='gls', prefit=True):
         # out = regressors.fit(Y, C, K, f, method=method) <- actually use this
         q = self.ensure_qrange(q)
         self.prepare_vectors(q)
@@ -442,6 +443,17 @@ class SolutionScatteringModel:
         def residual(params, q, y, L, sps):
             dy = self.fit_func(params, q, sps) - y
             return L.T @ dy
+
+        # prefit
+        if prefit:
+            vary_status = {key : self.params0[key].vary for key in self.params0.keys()}
+            for key in self.solute.par_labels:
+                self.params0[key].vary = False
+            out_pre = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
+                                 scale_covar=False, method='least_squares')
+            self.params0 = out_pre.params
+            for key in self.params0.keys():
+                self.params0[key].vary = vary_status[key]
 
         out = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
                              scale_covar=False, method='least_squares')
