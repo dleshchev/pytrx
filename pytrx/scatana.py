@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
-from pytrx.utils import weighted_mean
+from pytrx.utils import weighted_mean, time_str2num
 import lmfit
 
 
@@ -110,22 +110,35 @@ class SmallMoleculeProject:
         if qmax is None: qmax = self.data.q.max()
         q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
         q_idx = check_range_with_cov_matrix(self.data.q, q_idx, self.data.diff.covqq)
-        # TODO t and trange should be strings or numbers
 
         # check t-range
-        if t is None:
+        if (t is None) and (trange is None):
             t = 'all'
 
-        if t == 'all':
-            t_idx = np.ones(self.data.t.size, dtype=bool)
-
-        if trange is not None:
-            t_idx = (self.data.t>=trange[0]) & (self.data.t<=trange[1])
-
+        if type(t) == str:
+            if t == 'all':
+                t_idx = np.ones(self.data.t.size, dtype=bool)
+            else:
+                t_idx = self.data.t_str == t
         if type(t) == list:
             t_idx = np.zeros(self.data.t.size, dtype=bool)
             for each_t in t:
-                t_idx += self.data.t == t
+                if type(each_t) == str:
+                    upd = self.data.t_str == each_t
+                else:
+                    upd = self.data.t == each_t
+                t_idx += upd
+
+        if trange is not None:
+            assert (type(trange) == list) and len(trange) == 2, 'trange must be a 2-element list'
+            if type(trange[0]) == str:
+                trange0 = time_str2num(trange[0])
+            else: trange0 = trange[0]
+            if type(trange[1]) == str:
+                trange1 = time_str2num(trange[1])
+            else: trange1 = trange[1]
+            t_idx = (self.data.t>=trange0) & (self.data.t<=trange1)
+
         t_idx = check_range_with_cov_matrix(self.data.t, t_idx, self.data.diff.covtt)
 
         # get the targets
