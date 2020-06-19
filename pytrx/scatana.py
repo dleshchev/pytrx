@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
+from pytrx.utils import weighted_mean
 import lmfit
 
 
@@ -133,10 +134,8 @@ class SmallMoleculeProject:
         K_target = self.data.diff.covtt[np.ix_(t_idx, t_idx)]
 
         if tavrg:
-            # TODO weighted averaging instead of the dumb one
-            A = np.ones(np.sum(t_idx))/np.sum(t_idx)
-            ds_target = (ds_target @ A)[:, None]
-            K_target = (A @ K_target @ A.T)[None, None]
+            ds_target_T, K_target = weighted_mean(ds_target.T, K_target)
+            ds_target = ds_target_T.T
 
         n_curves = ds_target.shape[1]
         output = []

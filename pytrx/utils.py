@@ -118,6 +118,19 @@ def cov2corr(C):
     d = np.diag(1/np.sqrt(np.diag(C)))
     return d @ C @ d
 
+def weighted_mean(y, K):
+
+    nt = y.shape[0]
+    A = np.ones((nt, 1))
+
+    K_inv = np.linalg.inv(K)
+    H = np.linalg.inv(A.T @ K_inv @ A) @ A.T @ K_inv
+    y_av = H @ y
+    K_av = H @ K @ H.T
+    return y_av, K_av
+
+
+
 
 def z_num2str(z):
     return ElementString()[z - 1]
