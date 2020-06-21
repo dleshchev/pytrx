@@ -16,6 +16,7 @@ import pkg_resources
 
 from pytrx import hydro
 from pytrx.transformation import *
+from numba import njit, prange
 
 
 class Molecule:
@@ -213,21 +214,104 @@ def formFactor(q, Elements):
     return f
 
 
-def Debye(q, mol, f=None, atomOnly=False):
+def Debye(q, mol, f=None, atomOnly=False, debug=False):
     if f is None:
         f = formFactor(q, mol.Z)
+    if debug:
+        print(f)
     Scoh = np.zeros(q.shape)
     mol.calcDistMat()
     natoms = mol.Z.size
-    for idx1 in range(natoms):
-        if not atomOnly:
-            for idx2 in range(idx1 + 1, natoms):
-                r12 = mol.dist_mat[idx1, idx2]
-                qr12 = q * r12
-                Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12) / qr12
-        Scoh += f[mol.Z[idx1]] ** 2
+    # Baseline speed - 164 ms
+    # for idx1 in range(natoms):
+    #     if not atomOnly:
+    #         for idx2 in range(idx1 + 1, natoms):
+    #             r12 = mol.dist_mat[idx1, idx2]
+    #             qr12 = q * r12
+    #             Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12) / qr12
+    #     Scoh += f[mol.Z[idx1]] ** 2
+
+    # Trial 1 use predefined f list - 155 ms
+    # FFtable = np.zeros((natoms,len(q)))
+    # for idx in range(natoms):
+    #     FFtable[idx] = f[mol.Z[idx]]
+    # for idx1 in range(natoms):
+    #     if not atomOnly:
+    #         for idx2 in range(idx1 + 1, natoms):
+    #             r12 = mol.dist_mat[idx1, idx2]
+    #             qr12 = q * r12
+    #             Scoh += 2 * FFtable[idx1] * FFtable[idx2] * np.sin(qr12) / qr12
+    #     Scoh += f[mol.Z[idx1]] ** 2
+
+    # Trial 2 use predefined f list and broadcast - 124 ms
+    # FFtable = np.zeros((natoms, len(q)))
+    # for idx in range(natoms):
+    #     FFtable[idx] = f[mol.Z[idx]]
+    # for idx1 in range(natoms):
+    #     if atomOnly:
+    #         Scoh += f[mol.Z[idx1]] ** 2
+    #     else:
+    #         r12 = mol.dist_mat[idx1][:,None]
+    #         # print(r12.shape, q.shape)
+    #         qr12 = q[None,:] * r12
+    #         # print(qr12.shape,FFtable[idx1][None,:].shape, FFtable.shape, np.sinc(qr12/np.pi).shape)
+    #         Scoh += (FFtable[idx1][None,:] * FFtable * np.sinc(qr12 / np.pi)).sum(0)
+
+    # Trial 3 decrease usage of large matrices - 118 ms
+    # FFtable = np.zeros((natoms, len(q)))
+    # for idx in range(natoms):
+    #     FFtable[idx] = f[mol.Z[idx]]
+    # for idx1 in range(natoms):
+    #     if atomOnly:
+    #         Scoh += f[mol.Z[idx1]] ** 2
+    #     else:
+    #         r12 = mol.dist_mat[idx1][:, None]
+    #         # print(r12.shape, q.shape)
+    #         # qr12 = q[None, :] * r12
+    #         FFqr12 = np.sum(FFtable * np.sinc(q[None, :] * r12 / np.pi), axis=0)
+    #         # FFqr12 = np.nansum(FFtable * np.sin(qr12) / qr12, axis=0)
+    #         # FFqr12 = FFqr12calc(FFtable, q, r12)
+    #         # print(FFqr12.shape)
+    #         # print(qr12.shape,FFtable[idx1][None,:].shape, FFtable.shape, np.sinc(qr12/np.pi).shape)
+    #         Scoh += FFtable[idx1] * FFqr12
+
+    # Trial 4 use numba - 52 ms for Scoh_calc and 17 ms for Scoh_calc2
+    FFtable = np.zeros((natoms, len(q)))
+    for idx in range(natoms):
+        FFtable[idx] = f[mol.Z[idx]]
+    if atomOnly:
+        for idx1 in range(natoms):
+            Scoh += f[mol.Z[idx1]] ** 2
+    else:
+        Scoh = Scoh_calc2(FFtable, q, mol.dist_mat, natoms)
+
+    if debug:
+        print(Scoh)
 
     return Scoh
+
+@njit
+def Scoh_calc(FF, q, r, natoms):
+    Scoh = np.zeros(q.shape)
+    for idx1 in range(natoms):
+        for idx2 in range(idx1 + 1, natoms):
+            r12 = r[idx1, idx2]
+            qr12 = q * r12
+            Scoh += 2 * FF[idx1] * FF[idx2] * np.sin(qr12) / qr12
+        Scoh += FF[idx1] ** 2
+    return Scoh
+
+@njit(parallel=True)
+def Scoh_calc2(FF, q, r, natoms):
+    # Scoh = np.zeros(q.shape)
+    Scoh2 = np.zeros((natoms, len(q)))
+    for idx1 in prange(natoms):
+        for idx2 in range(idx1 + 1, natoms):
+            r12 = r[idx1, idx2]
+            qr12 = q * r12
+            Scoh2[idx1] += 2 * FF[idx1] * FF[idx2] * np.sin(qr12) / qr12
+        Scoh2[idx1] += FF[idx1] ** 2
+    return np.sum(Scoh2, axis=0)
 
 
 def DebyeFromGR(q, gr, f=None, rmax=None, cage=False):
