@@ -99,9 +99,13 @@ class Molecule:
                 self.xyz = t.transform(self.xyz, self.Z_num, p)
 
     def s(self, q, pars=None):
+        if not hasattr(self, 'atomic_formfactors'):
+            self._atomic_formfactors = formFactor(q, self.Z)
         self.transform(pars)
         # TODO: compute form-factors and store them in Molecule and pass them to Debye
-        return Debye(q, self)
+        return Debye(q, self, f=self._atomic_formfactors)
+
+        # return Debye(q, self)
 
 
     def clash(self):
