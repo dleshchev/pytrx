@@ -99,7 +99,7 @@ class Molecule:
                 self.xyz = t.transform(self.xyz, self.Z_num, p)
 
     def s(self, q, pars=None):
-        if not hasattr(self, 'atomic_formfactors'):
+        if not hasattr(self, '_atomic_formfactors'):
             self._atomic_formfactors = formFactor(q, self.Z)
         self.transform(pars)
         # TODO: compute form-factors and store them in Molecule and pass them to Debye
