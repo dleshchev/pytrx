@@ -143,6 +143,8 @@ class SmallMoleculeProject:
 
         # get the targets
         qfit = self.data.q[q_idx]
+        tfit = self.data.t[t_idx]
+        tfit_str = self.data.t_str[t_idx]
         ds_target = self.data.diff.s_av[np.ix_(q_idx, t_idx)]
 
         C_target = self.data.diff.covqq[np.ix_(q_idx, q_idx)]
@@ -157,7 +159,7 @@ class SmallMoleculeProject:
 
         for i in range(n_curves):
             output.append(self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
-                                         self.solvent_per_solute(), method=method, prefit=prefit))
+                                         self.solvent_per_solute(), method=method, prefit=prefit, t=tfit[i], t_str=tfit_str[i]))
         return output
         # return ds_target, C_target, K_target
 
@@ -429,7 +431,7 @@ class SolutionScatteringModel:
 
 
 
-    def fit(self, q, ds_exp, C, sps, method='gls', prefit=True):
+    def fit(self, q, ds_exp, C, sps, method='gls', prefit=True, **kwargs):
         # out = regressors.fit(Y, C, K, f, method=method) <- actually use this
         q = self.ensure_qrange(q)
         self.prepare_vectors(q)
@@ -449,14 +451,17 @@ class SolutionScatteringModel:
             vary_status = {key : self.params0[key].vary for key in self.params0.keys()}
             for key in self.solute.par_labels:
                 self.params0[key].vary = False
-            out_pre = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
+            result_pre = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
                                  scale_covar=False, method='least_squares')
-            self.params0 = out_pre.params
+            self.params0 = result_pre.params
             for key in self.params0.keys():
                 self.params0[key].vary = vary_status[key]
 
-        out = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
+        result = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
                              scale_covar=False, method='least_squares')
+
+        out = optimizedResultEntry(q, ds_exp, C, self.fit_func(result.params, q, sps), result, **kwargs )
+
         return out
 
 
@@ -552,7 +557,25 @@ class SolutionScatteringModel:
 
 
 
+class optimizedResultEntry:
+# this should be a dictionary with extra methods
+    def __init__(self, q, ds_exp, C_exp, ds_th, minimizerResult, **kwargs):
+        self._q = q
+        self._ds_exp = ds_exp
+        self._C_exp = C_exp
+        self._ds_th = ds_th
+        self._params = minimizerResult.params
+        self._out = minimizerResult
+        for key in kwargs.keys():
+            setattr(self, key, kwargs[key])
 
+    def __get__(self, key):
+
+
+    def keys(self):
+        keys = list(self._params.keys())
+        keys += ['q', 'ds_exp', 'C', 'ds_err', 'ds_th', self.t, self.t_str]
+        return (i for i in keys)
 
 
 
