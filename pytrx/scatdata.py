@@ -1182,8 +1182,8 @@ def distribute_Mat2ScatData(matfile):
     data = ScatData(None)
     matdata = scipy.io.loadmat(matfile)
     data.q = matdata['data']['q'][0][0].squeeze()
-    data.t = matdata['data']['t'][0][0].squeeze()
-    data.t_str = np.array([time_num2str(i * 1e-12) for i in data.t])
+    data.t = matdata['data']['t'][0][0].squeeze()*1e-12
+    data.t_str = np.array([time_num2str(i) for i in data.t])
     data.diff.s_av = matdata['data']['ds0'][0][0]
     # data.diff.s = np.copy(data.diff.s)  # Allow both s and ds be used
     data.diff.s2 = matdata['data']['ds2'][0][0]

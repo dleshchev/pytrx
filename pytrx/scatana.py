@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
-from pytrx.utils import weighted_mean, time_str2num
+from pytrx.utils import weighted_mean, time_str2num, time_num2str
 import lmfit
 
 
@@ -45,6 +45,7 @@ class SmallMoleculeProject:
         if type(input_data) == str:
             self.data = ScatData(input_data, smallLoad=True)
         elif type(input_data) == ScatData:
+
             print('Inputting ScatData data')
             self.data = input_data
         else:
@@ -67,7 +68,7 @@ class SmallMoleculeProject:
         Returns:
 
         '''
-        if qNormRange is None:
+        if qNormRange == None:
             qNormRange = self.data.aiGeometry.qNormRange
 
         assert (self.metadata.solvent is not None), 'Solvent in metadata not specified.'
@@ -77,7 +78,7 @@ class SmallMoleculeProject:
 
         q = self.data.q
         q_sel = (q >= qNormRange[0]) & (q <= qNormRange[1])
-        if idx_off is None:
+        if idx_off == None:
             idx_off = self.data.t_str == self.data.diff.toff_str
         s_off = self.data.total.s_av[:, idx_off].copy()
 
@@ -106,13 +107,13 @@ class SmallMoleculeProject:
     def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls', prefit=True):
 
         # check q-range
-        if qmin is None: qmin = self.data.q.min()
-        if qmax is None: qmax = self.data.q.max()
+        if qmin == None: qmin = self.data.q.min()
+        if qmax == None: qmax = self.data.q.max()
         q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
         q_idx = check_range_with_cov_matrix(self.data.q, q_idx, self.data.diff.covqq)
 
         # check t-range
-        if (t is None) and (trange is None):
+        if (t == None) and (trange == None):
             t = 'all'
 
         if type(t) == str:
@@ -155,11 +156,12 @@ class SmallMoleculeProject:
             ds_target = ds_target_T.T
 
         n_curves = ds_target.shape[1]
-        output = []
+        param_labels = list(self.model.params0.keys())
+        output = optimizedResult(qfit, tfit, tfit_str, param_labels)
 
         for i in range(n_curves):
-            output.append(self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
-                                         self.solvent_per_solute(), method=method, prefit=prefit, t=tfit[i], t_str=tfit_str[i]))
+            output[tfit_str[i]] = self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
+                                         self.solvent_per_solute(), method=method, prefit=prefit)
         return output
         # return ds_target, C_target, K_target
 
@@ -376,7 +378,7 @@ def read_sigma(sigma):
 
 
 def deal_pars(pars, n):
-    if pars is None:
+    if pars == None:
         pars_es, pars_gs = None, None
     else:
         pars_es, pars_gs = pars[:n], pars[n:]
@@ -398,6 +400,7 @@ _dsdr_dict = {'value' : 0, 'vary' : True}
 
 class SolutionScatteringModel:
     def __init__(self, *args,
+                 label=None,
                  esf_dict=_esf_dict,
                  cage_dict=_cage_dict,
                  dsdt_dict=_dsdt_dict,
@@ -407,6 +410,7 @@ class SolutionScatteringModel:
         self.solvent = None
         self.cage = None
         self.add(*args)
+        self.label = label
         self.prepare_parameters(esf_dict=esf_dict,
                                 cage_dict=cage_dict,
                                 dsdt_dict=dsdt_dict,
@@ -431,7 +435,7 @@ class SolutionScatteringModel:
 
 
 
-    def fit(self, q, ds_exp, C, sps, method='gls', prefit=True, **kwargs):
+    def fit(self, q, ds_exp, C, sps, method='gls', prefit=True):
         # out = regressors.fit(Y, C, K, f, method=method) <- actually use this
         q = self.ensure_qrange(q)
         self.prepare_vectors(q)
@@ -460,7 +464,7 @@ class SolutionScatteringModel:
         result = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
                              scale_covar=False, method='least_squares')
 
-        out = optimizedResultEntry(q, ds_exp, C, self.fit_func(result.params, q, sps), result, **kwargs )
+        out = optimizedResultEntry(ds_exp, self.fit_func(result.params, q, sps), result )
 
         return out
 
@@ -517,30 +521,30 @@ class SolutionScatteringModel:
         params0 = lmfit.Parameters()
 
 
-        if self.solute is None:
+        if self.solute == None:
             self.solute = Solute() # self.solute.ds(q) returns zero array with q.size
             params0.add('esf', value=0, vary=False)
         else:
             params0.add('esf', **esf_dict)
 
-        if self.cage is None:
+        if self.cage == None:
             self.cage = Cage((np.array([0, 1e6]), np.array([0, 0])))
             params0.add('cage_amp', value=0, vary=False)
         else:
             params0.add('cage_amp', **cage_dict)
 
-        if self.solvent is None:
+        if self.solvent == None:
             self.solvent = Solvent((np.array([0, 1e6]), np.array([0, 0]), np.array([0, 0])))
             params0.add('dsdt_amp', value=0, vary=False)
             params0.add('dsdr_amp', value=0, vary=False)
         else:
-            if self.solvent.dsdt_orig is None:
+            if self.solvent.dsdt_orig == None:
                 self.solvent.dsdt = np.zeros(self.solvent.q.size)
                 params0.add('dsdt_amp', value=0, vary=False)
             else:
                 params0.add('dsdt_amp', **dsdt_dict)
 
-            if self.solvent.dsdr_orig is None:
+            if self.solvent.dsdr_orig == None:
                 self.solvent.dsdr = np.zeros(self.solvent.q.size)
                 params0.add('dsdr_amp', value=0, vary=False)
             else:
@@ -558,24 +562,98 @@ class SolutionScatteringModel:
 
 
 class optimizedResultEntry:
-# this should be a dictionary with extra methods
-    def __init__(self, q, ds_exp, C_exp, ds_th, minimizerResult, **kwargs):
-        self._q = q
-        self._ds_exp = ds_exp
-        self._C_exp = C_exp
-        self._ds_th = ds_th
-        self._params = minimizerResult.params
-        self._out = minimizerResult
-        for key in kwargs.keys():
-            setattr(self, key, kwargs[key])
+    def __init__(self, ds_exp, ds_th, minimizerResult : lmfit.minimizer.MinimizerResult):
 
-    def __get__(self, key):
+        self.ds_exp = ds_exp
+        self.ds_th = ds_th
+
+        keys = minimizerResult.params.keys()
+        self.params = {k : minimizerResult.params[k].value for k in keys}
+        self.params_err = {k: minimizerResult.params[k].stderr for k in keys}
+        self.chisq = minimizerResult.chisqr
+        self.chisq_red = minimizerResult.redchi
 
 
-    def keys(self):
-        keys = list(self._params.keys())
-        keys += ['q', 'ds_exp', 'C', 'ds_err', 'ds_th', self.t, self.t_str]
-        return (i for i in keys)
+
+class optimizedResult:
+
+    def __init__(self, q, t, t_str, param_labels):
+        self.q = q
+        self.t = t
+        self.t_str = t_str
+        self._d = {}
+        self.param_labels = param_labels
+        self._all_labels = (param_labels +
+                            [p+'_err' for p in param_labels]
+                            + ['chisq', 'chisq_red'])
+
+
+
+    def __setitem__(self, key, entry : optimizedResultEntry):
+        key_str = time_num2str(key)
+
+
+        assert key_str in self.t_str, 'key must be one of the predefined time-delays'
+        self._d[key_str] = entry
+
+        try:
+            key_num = time_str2num(key)
+            self._d[key_num] = entry
+        except ValueError:
+            pass
+
+
+
+
+    def __getitem__(self, key):
+
+        # if float then treat it as numerical time
+        if (type(key) == float) or (type(key) == int):
+            which_t = np.argmin(np.abs(self.t - key))
+            if not np.isclose(self.t[which_t], key, atol=np.finfo(float).eps):
+                print('t not found within range of the data, closest t is', self.t_str[which_t])
+            key = self.t_str[np.isclose(self.t, key, atol=np.finfo(float).eps)]
+
+        # if string, check if this is the time
+        if key in self._d.keys():
+            return self._d[key]
+
+        # otherwise check if this is parameter
+        elif key in self.param_labels:
+            vals = []
+            for each_t in self.t_str:
+                vals.append(self._d[each_t].params[key])
+            return np.array(vals)
+
+        elif key.endswith('_err'):
+            key = key[:-4]
+            vals = []
+            for each_t in self.t_str:
+                vals.append(self._d[each_t].params_err[key])
+            return np.array(vals)
+
+        elif key == 'chisq':
+            vals = []
+            for each_t in self.t_str:
+                vals.append(self._d[each_t].chisq)
+            return np.array(vals)
+
+        elif key == 'chisq_red':
+            vals = []
+            for each_t in self.t_str:
+                vals.append(self._d[each_t].chisq_red)
+            return np.array(vals)
+
+
+    def __getattr__(self, item):
+        return self.__getitem__(item)
+
+    def __dir__(self):
+        return ['q', 't', 't_str'] + [p for p in self.param_labels]
+
+
+
+
 
 
 

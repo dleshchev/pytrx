@@ -39,11 +39,17 @@ def time_str2num(t_str):
         Input: time delay string
         Output: time in s
     '''
+
+    if type(t_str) == float:
+        return t_str
+
     try:
         t = float(t_str)
     except ValueError:
         t_number = float(t_str[0:-2])
-        if 'ps' in t_str:
+        if 'fs' in t_str:
+            t = t_number * 1e-15
+        elif 'ps' in t_str:
             t = t_number * 1e-12
         elif 'ns' in t_str:
             t = t_number * 1e-9
@@ -59,6 +65,9 @@ def time_num2str(t):
         Input: time delay in s
         Output: time string
     '''
+
+    if (type(t) == str) or (type(t) == np.str_):
+        return t
 
     def convertToString(t, factor):
         t_r0 = round(t * factor)
