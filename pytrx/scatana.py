@@ -68,7 +68,7 @@ class SmallMoleculeProject:
         Returns:
 
         '''
-        if qNormRange == None:
+        if qNormRange is None:
             qNormRange = self.data.aiGeometry.qNormRange
 
         assert (self.metadata.solvent is not None), 'Solvent in metadata not specified.'
@@ -78,7 +78,7 @@ class SmallMoleculeProject:
 
         q = self.data.q
         q_sel = (q >= qNormRange[0]) & (q <= qNormRange[1])
-        if idx_off == None:
+        if idx_off is None:
             idx_off = self.data.t_str == self.data.diff.toff_str
         s_off = self.data.total.s_av[:, idx_off].copy()
 
@@ -107,13 +107,13 @@ class SmallMoleculeProject:
     def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls', prefit=True):
 
         # check q-range
-        if qmin == None: qmin = self.data.q.min()
-        if qmax == None: qmax = self.data.q.max()
+        if qmin is None: qmin = self.data.q.min()
+        if qmax is None: qmax = self.data.q.max()
         q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
         q_idx = check_range_with_cov_matrix(self.data.q, q_idx, self.data.diff.covqq)
 
         # check t-range
-        if (t == None) and (trange == None):
+        if (t is None) and (trange is None):
             t = 'all'
 
         if type(t) == str:
@@ -378,7 +378,7 @@ def read_sigma(sigma):
 
 
 def deal_pars(pars, n):
-    if pars == None:
+    if pars is None:
         pars_es, pars_gs = None, None
     else:
         pars_es, pars_gs = pars[:n], pars[n:]
@@ -521,30 +521,30 @@ class SolutionScatteringModel:
         params0 = lmfit.Parameters()
 
 
-        if self.solute == None:
+        if self.solute is None:
             self.solute = Solute() # self.solute.ds(q) returns zero array with q.size
             params0.add('esf', value=0, vary=False)
         else:
             params0.add('esf', **esf_dict)
 
-        if self.cage == None:
+        if self.cage is None:
             self.cage = Cage((np.array([0, 1e6]), np.array([0, 0])))
             params0.add('cage_amp', value=0, vary=False)
         else:
             params0.add('cage_amp', **cage_dict)
 
-        if self.solvent == None:
+        if self.solvent is None:
             self.solvent = Solvent((np.array([0, 1e6]), np.array([0, 0]), np.array([0, 0])))
             params0.add('dsdt_amp', value=0, vary=False)
             params0.add('dsdr_amp', value=0, vary=False)
         else:
-            if self.solvent.dsdt_orig == None:
+            if self.solvent.dsdt_orig is None:
                 self.solvent.dsdt = np.zeros(self.solvent.q.size)
                 params0.add('dsdt_amp', value=0, vary=False)
             else:
                 params0.add('dsdt_amp', **dsdt_dict)
 
-            if self.solvent.dsdr_orig == None:
+            if self.solvent.dsdr_orig is None:
                 self.solvent.dsdr = np.zeros(self.solvent.q.size)
                 params0.add('dsdr_amp', value=0, vary=False)
             else:
