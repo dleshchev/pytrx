@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
 from pytrx.utils import weighted_mean, time_str2num, time_num2str
+from pytrx.regressors import  MainRegressor
 import lmfit
 
 
@@ -157,12 +158,15 @@ class SmallMoleculeProject:
 
         n_curves = ds_target.shape[1]
         param_labels = list(self.model.params0.keys())
-        output = optimizedResult(qfit, tfit, tfit_str, param_labels)
+
+        self.result = optimizedResult(qfit, tfit, tfit_str, param_labels)
+        # output = optimizedResult(qfit, tfit, tfit_str, param_labels)
 
         for i in range(n_curves):
-            output[tfit_str[i]] = self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
-                                         self.solvent_per_solute(), method=method, prefit=prefit)
-        return output
+            entry = self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
+                                 self.solvent_per_solute(), method=method, prefit=prefit)
+            self.result[tfit_str[i]] = entry
+
         # return ds_target, C_target, K_target
 
 
@@ -436,51 +440,38 @@ class SolutionScatteringModel:
 
 
     def fit(self, q, ds_exp, C, sps, method='gls', prefit=True):
-        # out = regressors.fit(Y, C, K, f, method=method) <- actually use this
+
         q = self.ensure_qrange(q)
         self.prepare_vectors(q)
 
-        if method == 'wls':
-            L = np.sqrt(np.diag(np.diag(C)))
-        else:
-            L = np.linalg.cholesky(np.linalg.inv(C))
+        # a wrapper to remove q-dependence
+        def ds_solute(p):
+            return self.solute.ds(q, p)/sps
+
+        regressor = MainRegressor(ds_exp, C, [('esf', ds_solute, None, None),
+                                              ('cage_amp', self.cage.ds/sps, None, None),
+                                              ('dsdt_amp', self.solvent.dsdt, None, None),
+                                              ('dsdr_amp', self.solvent.dsdr, None, None)],
+                                  self.solute.par_labels,
+                                  self.params0)
+
+        regressor.fit(prefit=prefit, method=method)
+        return optimizedResultEntry( regressor.result )
 
 
-        def residual(params, q, y, L, sps):
-            dy = self.fit_func(params, q, sps) - y
-            return L.T @ dy
-
-        # prefit
-        if prefit:
-            vary_status = {key : self.params0[key].vary for key in self.params0.keys()}
-            for key in self.solute.par_labels:
-                self.params0[key].vary = False
-            result_pre = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
-                                 scale_covar=False, method='least_squares')
-            self.params0 = result_pre.params
-            for key in self.params0.keys():
-                self.params0[key].vary = vary_status[key]
-
-        result = lmfit.minimize(residual, self.params0, args=(q, ds_exp, L, sps),
-                             scale_covar=False, method='least_squares')
-
-        out = optimizedResultEntry(ds_exp, self.fit_func(result.params, q, sps), result )
-
-        return out
-
-
-    def fit_func(self, params, q, sps): # need to add q argument
-        v = params.valuesdict()
-
-        if len(self.solute.par_labels) != 0:
-            pars_structural = [v[p] for p in self.solute.par_labels]
-        else:
-            pars_structural = None
-
-        return (v['esf']/sps * self.solute.ds(q, pars_structural)
-                + v['cage_amp']/sps * self.cage.ds
-                + v['dsdt_amp'] * self.solvent.dsdt
-                + v['dsdr_amp'] * self.solvent.dsdr)
+    #
+    # def fit_func(self, params, q, sps): # need to add q argument
+    #     v = params.valuesdict()
+    #
+    #     if len(self.solute.par_labels) != 0:
+    #         pars_structural = [v[p] for p in self.solute.par_labels]
+    #     else:
+    #         pars_structural = None
+    #
+    #     return (v['esf']/sps * self.solute.ds(q, pars_structural)
+    #             + v['cage_amp']/sps * self.cage.ds
+    #             + v['dsdt_amp'] * self.solvent.dsdt
+    #             + v['dsdr_amp'] * self.solvent.dsdr)
 
 
     def ensure_qrange(self, q_in):
@@ -499,12 +490,13 @@ class SolutionScatteringModel:
             long_print_flag = True
 
         if long_print_flag:
-            print('will perform fit below provided qmax based on the model/data')
+            print('will perform fit q-range based on the available q from the model')
 
         return q_out[(q_out>=qmin) & (q_out<=qmax)]
 
 
     def prepare_vectors(self, qfit):
+        # todo: proper uncertainty propagation
         self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
         self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
         self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
@@ -562,10 +554,7 @@ class SolutionScatteringModel:
 
 
 class optimizedResultEntry:
-    def __init__(self, ds_exp, ds_th, minimizerResult : lmfit.minimizer.MinimizerResult):
-
-        self.ds_exp = ds_exp
-        self.ds_th = ds_th
+    def __init__(self, minimizerResult : lmfit.minimizer.MinimizerResult):
 
         keys = minimizerResult.params.keys()
         self.params = {k : minimizerResult.params[k].value for k in keys}

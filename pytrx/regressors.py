@@ -5,6 +5,96 @@ from scipy import optimize
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import optimize
+import lmfit
+
+
+
+class MainRegressor:
+    def __init__(self, yt, Cy, problem_input, nonlinear_labels, params0):
+        self.yt = yt
+        self.Cy = Cy
+        # self.L = np.linalg.cholesky(np.linalg.inv(C))
+        self.nl_labels = nonlinear_labels
+        self.lin_labels = []
+        self.params0 = params0
+        self.vectors = {}
+        self.method = None
+        for item in problem_input:
+            key, v, Cv, _ = item
+            self.lin_labels.append(key)
+            self.vectors[key] = {'v' : v, 'Cv': Cv, 'exact': (Cv is None)}
+
+
+    def prepare_Ly(self):
+        if self.method == 'wls':
+            self.Ly = np.sqrt(np.diag(np.diag(self.Cy)))
+        else:
+            self.Ly = np.linalg.cholesky(np.linalg.inv(self.Cy))
+
+
+    def f_exact(self, params):
+        p = params.valuesdict()
+        if len(self.nl_labels) != 0:
+            p_nl = [p[t] for t in self.nl_labels]
+        else:
+            p_nl = None
+
+        y = np.zeros(self.yt.shape)
+        for key in self.lin_labels:
+            if self.vectors[key]['exact']:
+                v = self.vectors[key]['v']
+                if callable(v):
+                    y += p[key] * v(p_nl)
+                else:
+                    y += p[key] * v
+        return y
+
+
+
+    def f_nonexact(self, params):
+        v = params.valuesdict()
+        if self.method != 'tls':
+            y = np.zeros(self.yt.shape)
+            for key in self.lin_labels:
+                if not self.vectors[key]['exact']:
+                    y += v[key] * self.vectors[key]['v']
+        else:
+            y = np.zeros(self.yt.shape)
+        return y
+
+
+    def fit_func(self, params):
+        return self.f_exact(params) + self.f_nonexact(params)
+
+    def residual(self, params):
+        if not hasattr(self, 'Ly'): self.prepare_Ly()
+
+        if self.method != 'tls':
+            dy = self.fit_func(params) - self.yt
+            return self.Ly.T @ dy
+
+
+    def prefit(self):
+        method_hold = self.method
+        self.method = 'gls'
+        vary_status = {key: self.params0[key].vary for key in self.params0.keys()}
+        for key in self.nl_labels:
+            self.params0[key].vary = False
+        result_pre = lmfit.minimize(self.residual, self.params0,
+                                    scale_covar=False, method='least_squares')
+        self.params0 = result_pre.params
+        for key in self.params0.keys():
+            self.params0[key].vary = vary_status[key]
+        self.method = method_hold
+
+    def fit(self, prefit=True, method='gls'):
+        self.method = method
+        if prefit: self.prefit()
+
+        self.result = lmfit.minimize(self.residual, self.params0,
+                             scale_covar=False, method='least_squares')
+
+
 
 
 
