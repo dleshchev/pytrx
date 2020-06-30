@@ -176,7 +176,6 @@ class SmallMoleculeProject:
 ### write wrapper class output__class['esf'] <-- best fit values, should also give access to chisq red chisq, ds_target, ds_taget whatnot
 ### this output class or SmallMoleculeProject should have plotting functions to produce pretty figures for fitting 2D maps, 1D curves for specfici time delay with decomposition of the model on solute cage and solvent
 ### one must be able to supply list of models to the SmallMoleculeProject  think about it
-### optimize Debye by precomputing f
 ### Denis keeps working on TLS
 
 

@@ -4,32 +4,104 @@ from scipy import optimize
 
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy import optimize
+from scipy import optimize, linalg
 import lmfit
 
 
 
 class MainRegressor:
     def __init__(self, yt, Cy, problem_input, nonlinear_labels, params0):
+        # data input
         self.yt = yt
         self.Cy = Cy
-        # self.L = np.linalg.cholesky(np.linalg.inv(C))
+        self.n = self.yt.shape[0]
+
+
+        # label handling
         self.nl_labels = nonlinear_labels
         self.lin_labels = []
         self.params0 = params0
+
+        # problem unpacking
         self.vectors = {}
-        self.method = None
         for item in problem_input:
             key, v, Cv, _ = item
             self.lin_labels.append(key)
-            self.vectors[key] = {'v' : v, 'Cv': Cv, 'exact': (Cv is None)}
+            self.vectors[key] = {'v' : v, 'Cv' : Cv, 'exact' : (Cv is None)}
+
+        # placeholders for other fields
+        self.method = None
+        self.Ly = None
+
+        self.Vt = None
+        self.CV = None
+        self.CV_inv = None
+        self.chol_CV_inv = None
+        self.CVT = None
+        self.CVT_inv = None
+        self.chol_CVT_inv = None
 
 
-    def prepare_Ly(self):
+    def vec(self, V):
+        return V.T.ravel()
+
+    def bigB(self, B):
+        I = np.eye(self.n)
+        return np.block([[np.kron(I, b.T)] for b in B.T])
+
+    # def bigB(self, b):
+    #     I = np.eye(self.n)
+    #
+    #     # return np.block([[np.kron(I, b.T)] for b in B.T])
+    #     return np.kron(I, b)
+
+
+    def prepare_nonexact_matrix(self):
+        Vt = []
+        for key in self.lin_labels:
+            if not self.vectors[key]['exact']:
+                Vt.append(self.vectors[key]['v'])
+        self.m = len(Vt)
+        self.Vt = np.array(Vt).T
+
+
+
+    def prepare_nonexact_covariances(self):
+        cv_list = []
+        for k in self.lin_labels:
+            if not self.vectors[k]['exact']:
+                cv_list.append(self.vectors[k]['Cv'])
+        if cv_list is not None:
+            cv_inv_list = [np.linalg.pinv(cv) for cv in cv_list]
+            chol_cv_inv_list = [np.linalg.cholesky(cv_inv) for cv_inv in cv_inv_list]
+
+            self.CV = linalg.block_diag(*cv_list)
+            self.CV_inv = linalg.block_diag(*cv_inv_list)
+            self.chol_CV_inv = linalg.block_diag(*chol_cv_inv_list)
+
+            self.CVT = np.zeros((self.m * self.n, self.m * self.n))
+            self.CVT_inv = np.zeros((self.m * self.n, self.m * self.n))
+            self.chol_CVT_inv = np.zeros((self.m * self.n, self.m * self.n))
+
+            for i in range(self.m):
+                self.CVT[i::self.m, i::self.m] = cv_list[i]
+                self.CVT_inv[i::self.m, i::self.m] = cv_inv_list[i]
+                self.chol_CVT_inv[i::self.m, i::self.m] = chol_cv_inv_list[i]
+
+
+
+
+
+
+
+
+    def prepare_y_covariance(self):
         if self.method == 'wls':
-            self.Ly = np.sqrt(np.diag(np.diag(self.Cy)))
+            self.Cy_inv = np.diag(1/np.diag(self.Cy))
+            self.Ly = np.sqrt(np.diag(self.Cy_inv))
         else:
-            self.Ly = np.linalg.cholesky(np.linalg.inv(self.Cy))
+            self.Cy_inv = np.linalg.inv(self.Cy)
+            self.Ly = np.linalg.cholesky(self.Cy_inv)
 
 
     def f_exact(self, params):
@@ -52,30 +124,71 @@ class MainRegressor:
 
 
     def f_nonexact(self, params):
-        v = params.valuesdict()
+        p = params.valuesdict()
+        y = np.zeros(self.yt.shape)
+
         if self.method != 'tls':
-            y = np.zeros(self.yt.shape)
             for key in self.lin_labels:
                 if not self.vectors[key]['exact']:
-                    y += v[key] * self.vectors[key]['v']
+                    y += p[key] * self.vectors[key]['v']
+
         else:
-            y = np.zeros(self.yt.shape)
-        return y
+            if self.CV is None: self.prepare_nonexact_covariances()
+            if self.Vt is None: self.prepare_nonexact_matrix()
+            ## prepare the parameters for estimation
+            b = []
+            for key in self.lin_labels:
+                if not self.vectors[key]['exact']:
+                    b.append(p[key])
+            b = np.array(b)[:, None]
+
+            # form the matrices for estimation
+            I = np.eye(self.m * self.n)
+            Z = np.block([[self.bigB(b)], [I]])
+
+            Null = np.zeros((self.n * 1, self.n * self.m)) # 1 stands for the number of fitted curves
+            Oinv = np.block([[self.Cy_inv, Null],
+                             [Null, self.CVT_inv]])
+
+            E = np.block([self.yt - self.f_exact(params),
+                          self.vec(self.Vt.T)])
+            # estimate!
+            vecVT = np.linalg.pinv(Z.T @ Oinv @ Z) @ Z.T @ Oinv @ E
+
+
+            self.V = np.reshape(vecVT, (self.n, self.m))
+
+            y = self.V @ b
+            # print(self.V.shape, b.shape, y.shape)
+            idx = 0
+            for key in self.lin_labels:
+                if not self.vectors[key]['exact']:
+                    self.vectors[key]['v_estimated'] = self.V[:, idx]
+                    idx += 1
+
+        return y.ravel()
 
 
     def fit_func(self, params):
         return self.f_exact(params) + self.f_nonexact(params)
 
-    def residual(self, params):
-        if not hasattr(self, 'Ly'): self.prepare_Ly()
 
+
+    def residual(self, params):
+        if self.Ly is None: self.prepare_y_covariance()
+        # print(self.fit_func(params).shape, self.yt.shape, (self.fit_func(params) - self.yt).shape)
+        dy_w = self.Ly.T @ (self.fit_func(params) - self.yt) # for TLS this updates self.V
         if self.method != 'tls':
-            dy = self.fit_func(params) - self.yt
-            return self.Ly.T @ dy
+            return dy_w
+        else:
+            dV_w = self.chol_CVT_inv.T @ self.vec((self.V -self.Vt).T)
+            # print(dy_w.shape, dV_w.shape)
+            return np.hstack((dy_w, dV_w))
+
 
 
     def prefit(self):
-        method_hold = self.method
+        method_hold = self.method # prefit is executed using gls regression
         self.method = 'gls'
         vary_status = {key: self.params0[key].vary for key in self.params0.keys()}
         for key in self.nl_labels:
@@ -87,58 +200,68 @@ class MainRegressor:
             self.params0[key].vary = vary_status[key]
         self.method = method_hold
 
+
+
     def fit(self, prefit=True, method='gls'):
         self.method = method
+        if self.method == 'tls':
+            tls_possible = self.check_if_tls_is_possible()
+            if not tls_possible:
+                print('No model vectors with uncertainty are found, the fitting will be performed using GLS')
         if prefit: self.prefit()
 
         self.result = lmfit.minimize(self.residual, self.params0,
                              scale_covar=False, method='least_squares')
 
 
+    def check_if_tls_is_possible(self):
+        self.prepare_nonexact_matrix()
+        if self.m > 0: return True
+        else: return False
+
 
 
 
 
 class NLPTLS:
-    def __init__(self, Yt, Cy, Ky, s_t_list, Cs_list, f):
-        if Yt.ndim == 1:
-            Yt = Yt[:, None]
-        self.Yt = Yt
-        self.n, self.k = Yt.shape
-        self.Cy = Cy
-        self.Cy_diag = np.diag(np.diag(Cy))
-        self.Cy_inv = np.linalg.pinv(Cy)
-        self.Cy_diag_inv = np.diag(1 / np.diag(Cy))
-        self.chol_Cy_inv = np.linalg.cholesky(self.Cy_inv)
+    def __init__(self, Y_t, C, K, s_t_list, Q_list, f):
+        #        self.x = x
+        if Y_t.ndim == 1:
+            Y_t = Y_t[:, None]
+        self.Y_t = Y_t
+        self.n, self.k = Y_t.shape
+        self.C = C
+        self.Cdiag = np.diag(np.diag(C))
+        self.Cinv = np.linalg.pinv(C)
+        self.Cdiaginv = np.diag(1 / np.diag(C))
+        self.L = np.linalg.cholesky(self.Cinv)
 
-        if Ky.ndim == 1:
-            Ky = np.array([[Ky]])
-        self.Ky = Ky
-        self.Ky_inv = np.linalg.pinv(Ky)
-        self.chol_Ky_inv = np.linalg.cholesky(self.Ky_inv)
+        if K.ndim == 1:
+            K = np.array([[K]])
+        self.K = K
+        self.Kinv = np.linalg.pinv(K)
+        self.D = np.linalg.cholesky(self.Kinv)
 
-        self.Gy = np.kron(self.Ky, self.Cy)
-        self.Gy_diag = np.diag(np.diag(self.Gy))
-        self.Gy_inv = np.kron(self.Ky_inv, self.Cy_inv)
-        self.Gy_diag_inv = np.diag(1 / np.diag(self.Gy))
-        self.chol_Gy_inv = np.kron(self.chol_Ky_inv, self.chol_Cy_inv)
+        self.G = np.kron(self.K, self.C)
+        self.Gdiag = np.diag(np.diag(self.G))
+        self.Ginv = np.kron(self.Kinv, self.Cinv)
+        self.Gdiaginv = np.diag(1 / np.diag(self.G))
+        self.H = np.kron(self.D, self.L)
 
         s_t_list = [np.squeeze(s_t) for s_t in s_t_list]
         self.S_t = np.array(s_t_list).T
         self.m = len(s_t_list)
+        self.Q_list = Q_list
+        self.Qinv_list = [np.linalg.pinv(Q) for Q in Q_list]
+        self.V_list = [np.linalg.cholesky(Qinv) for Qinv in self.Qinv_list]
 
-        if Cs_list is not None:
-            self.Cs_list = Cs_list
-            self.Cs_inv_list = [np.linalg.pinv(Cs) for Cs in Cs_list]
-            self.chol_Cs_inv_list = [np.linalg.cholesky(Cs_inv) for Cs_inv in self.Cs_inv_list]
-
-            self.CS = np.zeros((self.m * self.n, self.m * self.n))
-            self.CS_inv = np.zeros((self.m * self.n, self.m * self.n))
-            self.chol_CS_inv = np.zeros((self.m * self.n, self.m * self.n))
-            for i in range(self.m):
-                self.CS[i::self.m, i::self.m] = self.Cs_list[i]
-                self.CS_inv[i::self.m, i::self.m] = self.Cs_inv_list[i]
-                self.chol_CS_inv[i::self.m, i::self.m] = self.chol_Cs_inv_list[i]
+        self.CS = np.zeros((self.m * self.n, self.m * self.n))
+        self.CSinv = np.zeros((self.m * self.n, self.m * self.n))
+        self.W = np.zeros((self.m * self.n, self.m * self.n))
+        for i in range(self.m):
+            self.CS[i::self.m, i::self.m] = self.Q_list[i]
+            self.CSinv[i::self.m, i::self.m] = self.Qinv_list[i]
+            self.W[i::self.m, i::self.m] = self.V_list[i]
 
         self.f = f
 
@@ -171,18 +294,18 @@ class NLPTLS:
         I = np.eye(self.m * self.n)
         Z = np.block([[self.bigB(B)], [I]])
         Null = np.zeros((self.n * self.k, self.n * self.m))
-        Oinv = np.block([[self.Gy_inv, Null],
-                         [Null, self.Gy_inv]])
-        E = np.block([self.vec(self.Yt - self.F(X)),
+        Oinv = np.block([[self.Ginv, Null],
+                         [Null, self.CSinv]])
+        E = np.block([self.vec(self.Y_t - self.F(X)),
                       self.vec(self.S_t.T)])
         vecST = np.linalg.pinv(Z.T @ Oinv @ Z) @ Z.T @ Oinv @ E
         return np.reshape(vecST, (self.n, self.m))
 
     def resid_Y(self, P, S):
-        return self.chol_Gy_inv.T @ self.vec(self.Yt - self.Y(P, S))
+        return self.H.T @ self.vec(self.Y_t - self.Y(P, S))
 
     def resid_S(self, S):
-        return self.chol_CS_inv.T @ self.vec(S.T - self.S_t.T)
+        return self.W.T @ self.vec(S.T - self.S_t.T)
 
     def chisq(self, P, S):
         rY = self.resid_Y(P, S)
@@ -206,12 +329,12 @@ class NLPTLS:
 
     def resid_ols(self, pars):
         P = self.unflatten_pars(pars)
-        return self.vec(self.Yt - self.Y(P, self.S_t)) / np.diag(self.Gy)
+        return self.vec(self.Y_t - self.Y(P, self.S_t)) / np.diag(self.G)
 
     def ols_lin(self, X0):
-        # np.diag(self.C)
-        a = np.linalg.pinv(self.S_t.T @ self.Cy_diag_inv @ self.S_t)
-        b = self.S_t.T @ self.Cy_diag_inv @ (self.Yt - self.F(X0))
+        np.diag(self.C)
+        a = np.linalg.pinv(self.S_t.T @ self.Cdiaginv @ self.S_t)
+        b = self.S_t.T @ self.Cdiaginv @ (self.Y_t - self.F(X0))
         return a @ b
 
     def ols(self, X0, printing=False):
@@ -220,7 +343,7 @@ class NLPTLS:
         if printing: print('OLS success:', opt_ols['success'])
 
         J_w = opt_ols['jac']
-        J = np.sqrt(self.Gy_diag) @ J_w
+        J = np.sqrt(self.Gdiag) @ J_w
         Hess = J_w.T @ J_w
         C_all = np.linalg.pinv(Hess)
         self.P_ols = Parameter(opt_ols['x'], C=C_all,
@@ -229,8 +352,8 @@ class NLPTLS:
                                C=(J @ C_all @ J.T))
 
     def gls_lin(self, X0):
-        a = np.linalg.pinv(self.S_t.T @ self.Cy_inv @ self.S_t)
-        b = self.S_t.T @ self.Cy_inv @ (self.Yt - self.F(X0))
+        a = np.linalg.pinv(self.S_t.T @ self.Cinv @ self.S_t)
+        b = self.S_t.T @ self.Cinv @ (self.Y_t - self.F(X0))
         return a @ b
 
     def gls(self, X0, printing=False):
@@ -239,7 +362,7 @@ class NLPTLS:
         if printing: print('GLS success:', opt_gls['success'])
 
         J_w = opt_gls['jac']
-        J = np.linalg.pinv(self.chol_Gy_inv.T) @ J_w
+        J = np.linalg.pinv(self.H.T) @ J_w
         Hess = J_w.T @ J_w
         C_all = np.linalg.pinv(Hess)
         self.P_gls = Parameter(opt_gls['x'], C=C_all,
@@ -268,7 +391,7 @@ class NLPTLS:
                                flat=True, ncols=self.k)
         self.S_tls = Parameter(opt_tls['x'][idx:], C=Cov_s,
                                flat=True, ncols=self.m)
-        self.Ytls = Parameter(self.Y(self.P_tls.value, self.S_tls.value),
+        self.Y_tls = Parameter(self.Y(self.P_tls.value, self.S_tls.value),
                                C=(J @ Cov_all @ J.T))
 
 
