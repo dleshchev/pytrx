@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
 from pytrx.utils import weighted_mean, time_str2num, time_num2str
-from pytrx.regressors import  MainRegressor
+from pytrx.regressors import MainRegressor
 import lmfit
 
 
@@ -105,13 +105,38 @@ class SmallMoleculeProject:
         data = hydro.solvent_data[solvent]
         return data.density / data.molar_mass / concentration
 
-    def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls', prefit=True):
+
+    def check_qrange_with_model(self, q_idx):
+        q_in = self.data.q[q_idx]
+        # q_out = q_in.copy()
+        qmin = np.max((q_in.min(), self.model.solvent.q.min(), self.model.cage.q.min()))
+        qmax = np.min((q_in.max(), self.model.solvent.q.max(), self.model.cage.q.max()))
+
+        long_print_flag = False
+        if qmin > q_in.min():
+            print('invalid qmin - ', end='')
+            long_print_flag = True
+
+        if qmax < q_in.max():
+            print('invalid qmax - ', end='')
+            long_print_flag = True
+
+        if long_print_flag:
+            print('will perform fit q-range based on the available q from the model')
+
+        return (self.data.q>=qmin) & (self.data.q<=qmax)
+
+
+
+    def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls',
+            prefit=True, direction='forward', use_prev_param0=True):
 
         # check q-range
         if qmin is None: qmin = self.data.q.min()
         if qmax is None: qmax = self.data.q.max()
         q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
         q_idx = check_range_with_cov_matrix(self.data.q, q_idx, self.data.diff.covqq)
+        q_idx = self.check_qrange_with_model(q_idx)
 
         # check t-range
         if (t is None) and (trange is None):
@@ -147,8 +172,8 @@ class SmallMoleculeProject:
         qfit = self.data.q[q_idx]
         tfit = self.data.t[t_idx]
         tfit_str = self.data.t_str[t_idx]
-        ds_target = self.data.diff.s_av[np.ix_(q_idx, t_idx)]
 
+        ds_target = self.data.diff.s_av[np.ix_(q_idx, t_idx)]
         C_target = self.data.diff.covqq[np.ix_(q_idx, q_idx)]
         K_target = self.data.diff.covtt[np.ix_(t_idx, t_idx)]
 
@@ -156,24 +181,26 @@ class SmallMoleculeProject:
             ds_target_T, K_target = weighted_mean(ds_target.T, K_target)
             ds_target = ds_target_T.T
 
-        n_curves = ds_target.shape[1]
-        param_labels = list(self.model.params0.keys())
+        # prepare the model
+        self.model.prepare_model(qfit, self.solvent_per_solute())
 
-        self.result = optimizedResult(qfit, tfit, tfit_str, param_labels)
-        # output = optimizedResult(qfit, tfit, tfit_str, param_labels)
+        # generate description for the fitting round
+        description = {'qmin' : qfit[0],
+                       'qmax' : qfit[-1],
+                       'tmin' : tfit_str[0],
+                       'tmax' : tfit_str[-1],
+                       'averaged' : tavrg}
 
-        for i in range(n_curves):
-            entry = self.model.fit(qfit, ds_target[:, i], C_target * K_target[i,i],
-                                 self.solvent_per_solute(), method=method, prefit=prefit)
-            self.result[tfit_str[i]] = entry
+        # fit!
+        self.result = _fit(qfit, tfit, tfit_str, ds_target, C_target, K_target,
+                           self.model.problem_input, self.model.nonlinear_labels, self.model.params0,
+                           method=method, prefit=prefit,
+                           direction=direction, use_prev_param0=use_prev_param0, exp_labels=['ds', 'ds_err'],
+                           description=description)
 
-        # return ds_target, C_target, K_target
 
 
-### output[i] = model.fit(ds_target[:, i], bla bla bla)
 ###TODO:
-###TODO:minor rename C and K to covqq and covtt, may be ds as well
-### write wrapper class output__class['esf'] <-- best fit values, should also give access to chisq red chisq, ds_target, ds_taget whatnot
 ### this output class or SmallMoleculeProject should have plotting functions to produce pretty figures for fitting 2D maps, 1D curves for specfici time delay with decomposition of the model on solute cage and solvent
 ### one must be able to supply list of models to the SmallMoleculeProject  think about it
 ### Denis keeps working on TLS
@@ -437,61 +464,17 @@ class SolutionScatteringModel:
             raise TypeError ('invalid input type. Must be Solute, Solvent, or Cage')
 
 
-
-    def fit(self, q, ds_exp, C, sps, method='gls', prefit=True):
-
-        q = self.ensure_qrange(q)
+    def prepare_model(self, q, sps):
         self.prepare_vectors(q)
-
-        # a wrapper to remove q-dependence
         def ds_solute(p):
             return self.solute.ds(q, p)/sps
 
-        regressor = MainRegressor(ds_exp, C, [('esf', ds_solute, None, None),
-                                              ('cage_amp', self.cage.ds/sps, None, None),
-                                              ('dsdt_amp', self.solvent.dsdt, None, None),
-                                              ('dsdr_amp', self.solvent.dsdr, None, None)],
-                                  self.solute.par_labels,
-                                  self.params0)
+        self.problem_input = [ ('esf', 'ds_solute', ds_solute, None, None),
+                               ('cage_amp', 'ds_cage', self.cage.ds/sps, None, None),
+                               ('dsdt_amp', 'dsdt', self.solvent.dsdt, None, None),
+                               ('dsdr_amp', 'dsdr', self.solvent.dsdr, None, None)]
+        self.nonlinear_labels = self.solute.par_labels
 
-        regressor.fit(prefit=prefit, method=method)
-        return optimizedResultEntry( regressor.result )
-
-
-    #
-    # def fit_func(self, params, q, sps): # need to add q argument
-    #     v = params.valuesdict()
-    #
-    #     if len(self.solute.par_labels) != 0:
-    #         pars_structural = [v[p] for p in self.solute.par_labels]
-    #     else:
-    #         pars_structural = None
-    #
-    #     return (v['esf']/sps * self.solute.ds(q, pars_structural)
-    #             + v['cage_amp']/sps * self.cage.ds
-    #             + v['dsdt_amp'] * self.solvent.dsdt
-    #             + v['dsdr_amp'] * self.solvent.dsdr)
-
-
-    def ensure_qrange(self, q_in):
-
-        q_out = q_in.copy()
-        qmin = np.max((q_in.min(), self.solvent.q.min(), self.cage.q.min()))
-        qmax = np.min((q_in.max(), self.solvent.q.max(), self.cage.q.max()))
-
-        long_print_flag = False
-        if qmin > q_in.min():
-            print('invalid qmin - ', end='')
-            long_print_flag = True
-
-        if qmax < q_in.max():
-            print('invalid qmax - ', end='')
-            long_print_flag = True
-
-        if long_print_flag:
-            print('will perform fit q-range based on the available q from the model')
-
-        return q_out[(q_out>=qmin) & (q_out<=qmax)]
 
 
     def prepare_vectors(self, qfit):
@@ -552,29 +535,91 @@ class SolutionScatteringModel:
 
 
 
+
+
+
+def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method='gls', prefit=True,
+        direction='forward', use_prev_param0=False, exp_labels = ['ds', 'ds_err'], description=None):
+    assert direction in ['forward','backward'], 'direction of fitting must be forward or backward'
+
+    if Yt.ndim == 1: Yt = Yt[:, None]
+    if K.ndim == 1: K = K[:, None]
+
+    yt_label = exp_labels[0]
+    yt_err_label = exp_labels[1]
+
+    n_curves = Yt.shape[1]
+    n_comp = len(problem_input)
+
+    Y = np.zeros(Yt.shape)
+    components_fit = np.zeros(Yt.shape + (n_comp,))
+
+    if direction=='forward': i_generator = range(n_curves)
+    elif direction == 'backward': i_generator = range(n_curves-1, -1, -1)
+
+    param_labels = list(params0.keys())
+    component_labels = [i[1] for i in problem_input]
+    vector_labels = component_labels + [yt_label, yt_err_label]
+    result = optimizedResult(q, t, t_str, param_labels, vector_labels, description)
+
+    for i in i_generator:
+        regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
+                                  nonlinear_labels, params0)
+        regressor.fit(method=method, prefit=prefit)
+        vector_dict = {yt_label : regressor.yt,
+                       yt_err_label : regressor.Cy}
+        for v_label, p_label in zip(component_labels, param_labels):
+            vector_dict[v_label] = regressor.vectors[p_label]['v_fit']
+
+        result[t_str[i]] = optimizedResultEntry(regressor.result, vector_dict)
+
+
+        if use_prev_param0:
+            params0 = regressor.result.params
+            prefit = False
+
+    return result
+
+
+
+
 class optimizedResultEntry:
-    def __init__(self, minimizerResult : lmfit.minimizer.MinimizerResult):
+    def __init__(self, minimizerResult : lmfit.minimizer.MinimizerResult,
+                 vector_dict):
 
         keys = minimizerResult.params.keys()
         self.params = {k : minimizerResult.params[k].value for k in keys}
         self.params_err = {k: minimizerResult.params[k].stderr for k in keys}
         self.chisq = minimizerResult.chisqr
         self.chisq_red = minimizerResult.redchi
+        self.vector_dict = vector_dict
 
 
 
 class optimizedResult:
 
-    def __init__(self, q, t, t_str, param_labels):
+    def __init__(self, q, t, t_str, param_labels, vector_labels, description):
         self.q = q
         self.t = t
         self.t_str = t_str
         self._d = {}
         self.param_labels = param_labels
+        self.vector_labels = vector_labels
         self._all_labels = (param_labels +
-                            [p+'_err' for p in param_labels]
-                            + ['chisq', 'chisq_red'])
+                            [p+'_err' for p in param_labels] +
+                            vector_labels +
+                            ['chisq', 'chisq_red'])
+        self.description_dict = description
 
+
+    def __repr__(self):
+        _d = self.description_dict
+        output = ('This is the analysis result for data recorded in\n' +
+                  ('%0.2f' %_d["qmin"]) + ' < q < ' + ('%0.2f' %_d["qmax"]) + '\n' +
+                  f'{_d["tmin"]} < t < {_d["tmax"]}\n')
+        if _d['averaged']:
+            output += 'The data has been averaged along time axis'
+        return output
 
 
     def __setitem__(self, key, entry : optimizedResultEntry):
@@ -620,6 +665,12 @@ class optimizedResult:
                 vals.append(self._d[each_t].params_err[key])
             return np.array(vals)
 
+        elif key in self.vector_labels:
+            vals = []
+            for each_t in self.t_str:
+                vals.append(self._d[each_t].vector_dict[key])
+            return np.array(vals).T
+
         elif key == 'chisq':
             vals = []
             for each_t in self.t_str:
@@ -638,10 +689,6 @@ class optimizedResult:
 
     def __dir__(self):
         return ['q', 't', 't_str'] + [p for p in self.param_labels]
-
-
-
-
 
 
 
