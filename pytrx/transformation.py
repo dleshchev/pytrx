@@ -124,6 +124,7 @@ class Transformation_vibration(Transformation):
         return xyz + self.dxyz * amplitude
 
 
+
 class Transformation_distance(Transformation):
     # Move two groups of atoms closer/further in distance, using simple mean of coordinates as
     # reference centers for each group.

@@ -6,6 +6,7 @@ from pytrx import scatsim, hydro
 from pytrx.utils import weighted_mean, time_str2num, time_num2str
 from pytrx.regressors import MainRegressor
 import lmfit
+import time
 
 
 ## TODO:
@@ -131,7 +132,9 @@ class SmallMoleculeProject:
     def fit(self, qmin=None, qmax=None, t=None, trange=None, tavrg=False, method='gls',
             prefit=True, direction='forward', use_prev_param0=True):
 
+        print('Starting the fitting procedure')
         # check q-range
+        print(' ... checking the validity of the q-range')
         if qmin is None: qmin = self.data.q.min()
         if qmax is None: qmax = self.data.q.max()
         q_idx = (self.data.q >= qmin) & (self.data.q <= qmax)
@@ -139,6 +142,7 @@ class SmallMoleculeProject:
         q_idx = self.check_qrange_with_model(q_idx)
 
         # check t-range
+        print(' ... checking the validity of the t-range')
         if (t is None) and (trange is None):
             t = 'all'
 
@@ -168,6 +172,7 @@ class SmallMoleculeProject:
 
         t_idx = check_range_with_cov_matrix(self.data.t, t_idx, self.data.diff.covtt)
 
+        print('... definining the fitting targets ...')
         # get the targets
         qfit = self.data.q[q_idx]
         tfit = self.data.t[t_idx]
@@ -178,10 +183,12 @@ class SmallMoleculeProject:
         K_target = self.data.diff.covtt[np.ix_(t_idx, t_idx)]
 
         if tavrg:
+            print('... averaging data along t-axis ...')
             ds_target_T, K_target = weighted_mean(ds_target.T, K_target)
             ds_target = ds_target_T.T
 
         # prepare the model
+        print('... preparing the model vectors ...')
         self.model.prepare_model(qfit, self.solvent_per_solute())
 
         # generate description for the fitting round
@@ -192,11 +199,13 @@ class SmallMoleculeProject:
                        'averaged' : tavrg}
 
         # fit!
+        print('... fitting ...')
         self.result = _fit(qfit, tfit, tfit_str, ds_target, C_target, K_target,
                            self.model.problem_input, self.model.nonlinear_labels, self.model.params0,
                            method=method, prefit=prefit,
                            direction=direction, use_prev_param0=use_prev_param0, exp_labels=['ds', 'ds_err'],
                            description=description)
+        print('Done!')
 
 
 
@@ -562,7 +571,10 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
     vector_labels = component_labels + [yt_label, yt_err_label]
     result = optimizedResult(q, t, t_str, param_labels, vector_labels, description)
 
+    curve_counter = 1
     for i in i_generator:
+        starting_time = time.perf_counter()
+        print('Progress:', curve_counter, '/', n_curves, end='; ')
         regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
                                   nonlinear_labels, params0)
         regressor.fit(method=method, prefit=prefit)
@@ -577,6 +589,9 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
         if use_prev_param0:
             params0 = regressor.result.params
             prefit = False
+
+        print('took %0.0f'  %((time.perf_counter() - starting_time)*1e3), 'ms')
+        curve_counter += 1
 
     return result
 

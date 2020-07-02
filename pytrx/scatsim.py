@@ -15,7 +15,7 @@ from pytrx.utils import z_str2num, z_num2str
 import pkg_resources
 
 from pytrx import hydro
-from pytrx.transformation import *
+from pytrx.transformation import Transformation
 from numba import njit, prange
 
 
@@ -38,7 +38,7 @@ class Molecule:
         print("Running initial check up for associated_transformation")
         if associated_transformation is None:
             self._associated_transformation = None
-        elif type(associated_transformation) is list:
+        elif type(associated_transformation) == list:
             print("associated_transformation is a list. Examining elements...")
             for t in associated_transformation:
                 print(f'Checking {t}')
@@ -46,6 +46,7 @@ class Molecule:
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
+        # elif issubclass(associated_transformation, Transformation):
             self._associated_transformation = [associated_transformation]
         else:
             raise TypeError('Supplied transformations must be None, a transformation class, or a list of it')
