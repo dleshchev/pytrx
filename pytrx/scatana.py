@@ -568,7 +568,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
 
     param_labels = list(params0.keys())
     component_labels = [i[1] for i in problem_input]
-    vector_labels = component_labels + [yt_label, yt_err_label]
+    vector_labels = component_labels + [yt_label, yt_err_label] + ['resid', 'resid_w']
     result = optimizedResult(q, t, t_str, param_labels, vector_labels, description)
 
     curve_counter = 1
@@ -579,7 +579,9 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
                                   nonlinear_labels, params0)
         regressor.fit(method=method, prefit=prefit)
         vector_dict = {yt_label : regressor.yt,
-                       yt_err_label : regressor.Cy}
+                       yt_err_label : np.sqrt(np.diag(regressor.Cy)),
+                       'resid': (regressor.y - regressor.yt)[:q.size],
+                       'resid_w' : regressor.result.residual[:q.size]}
         for v_label, p_label in zip(component_labels, param_labels):
             vector_dict[v_label] = regressor.vectors[p_label]['v_fit']
 
@@ -590,7 +592,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
             params0 = regressor.result.params
             prefit = False
 
-        print('took %0.0f'  %((time.perf_counter() - starting_time)*1e3), 'ms')
+        print('took %0.0f' %((time.perf_counter() - starting_time)*1e3), 'ms')
         curve_counter += 1
 
     return result
@@ -673,7 +675,7 @@ class optimizedResult:
                 vals.append(self._d[each_t].params[key])
             return np.array(vals)
 
-        elif key.endswith('_err'):
+        elif (key.split('_')[0] in self.param_labels) and (key.endswith('_err')):
             key = key[:-4]
             vals = []
             for each_t in self.t_str:
