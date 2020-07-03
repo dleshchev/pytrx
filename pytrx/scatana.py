@@ -574,7 +574,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
     curve_counter = 1
     for i in i_generator:
         starting_time = time.perf_counter()
-        print('Progress:', curve_counter, '/', n_curves, end='; ')
+        print('Fitting time delay', t_str[i],'\tProgress:', curve_counter, '/', n_curves, end=' \t ')
         regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
                                   nonlinear_labels, params0)
         regressor.fit(method=method, prefit=prefit)
@@ -623,7 +623,7 @@ class optimizedResult:
         self._all_labels = (param_labels +
                             [p+'_err' for p in param_labels] +
                             vector_labels +
-                            ['chisq', 'chisq_red'])
+                            ['chisq', 'chisq_red'] + ['q', 't', 't_str'])
         self.description_dict = description
 
 
@@ -698,12 +698,15 @@ class optimizedResult:
                 vals.append(self._d[each_t].chisq_red)
             return np.array(vals)
 
+        else:
+            raise AttributeError(f"'optimizedResult' object has no attriubre '{key}'")
+
 
     def __getattr__(self, item):
         return self.__getitem__(item)
 
     def __dir__(self):
-        return ['q', 't', 't_str'] + [p for p in self.param_labels]
+        return self._all_labels
 
 
 
