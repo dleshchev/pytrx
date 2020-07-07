@@ -186,6 +186,8 @@ class SmallMoleculeProject:
             print('... averaging data along t-axis ...')
             ds_target_T, K_target = weighted_mean(ds_target.T, K_target)
             ds_target = ds_target_T.T
+            tfit = np.mean(tfit)
+            tfit_str = np.array([time_num2str((tfit))])
 
         # prepare the model
         print('... preparing the model vectors ...')
