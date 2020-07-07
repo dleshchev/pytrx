@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pytrx.scatdata import ScatData
 from pytrx import scatsim, hydro
-from pytrx.utils import weighted_mean, time_str2num, time_num2str
+from pytrx.utils import weighted_mean, bin_vector_with_covmat, time_str2num, time_num2str
 from pytrx.regressors import MainRegressor
 import lmfit
 import time
@@ -43,7 +43,7 @@ class SmallMoleculeProject:
             input_data - .h5 file created using ScatData.save method
             **kwargs - any metadata you like, e.g. concnetration=10, solvent='water', etc
         '''
-        # print(type(input_data), type(input_data) == ScatData)
+        print(type(input_data))
         if type(input_data) == str:
             self.data = ScatData(input_data, smallLoad=True)
         elif type(input_data) == ScatData:
@@ -205,7 +205,7 @@ class SmallMoleculeProject:
         self.result = _fit(qfit, tfit, tfit_str, ds_target, C_target, K_target,
                            self.model.problem_input, self.model.nonlinear_labels, self.model.params0,
                            method=method, prefit=prefit,
-                           direction=direction, use_prev_param0=use_prev_param0, exp_labels=['ds', 'ds_err'],
+                           direction=direction, use_prev_param0=use_prev_param0,
                            description=description)
         print('Done!')
 
@@ -312,7 +312,9 @@ class Solute:
         if pars is not None:
             assert len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
                 'nummber of parameteres should match the sum of numbers of parameters for gs and es'
-        pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
+            pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
+        else:
+            pars_es, pars_gs = None, None
         if printing: print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
 
         if (self.mol_es is not None) and (self.mol_gs is not None):
@@ -355,7 +357,7 @@ class Solvent:
 
     def __init__(self, input, sigma=None, K=None):
         self.q, self.dsdt_orig, self.dsdr_orig = self.parse_input(input)
-        self.C = read_sigma(sigma)
+        self.C_orig = read_sigma(sigma)
         self.K = K
 
     def parse_input(self, input):
@@ -380,7 +382,7 @@ class Cage:
 
     def __init__(self, input, sigma=None):
         self.q, self.ds_orig = self.parse_input(input)
-        self.C = read_sigma(sigma)
+        self.C_orig = read_sigma(sigma)
 
     def parse_input(self, input):
         if type(input) == tuple:
@@ -481,8 +483,8 @@ class SolutionScatteringModel:
             return self.solute.ds(q, p)/sps
 
         self.problem_input = [ ('esf', 'ds_solute', ds_solute, None, None),
-                               ('cage_amp', 'ds_cage', self.cage.ds/sps, None, None),
-                               ('dsdt_amp', 'dsdt', self.solvent.dsdt, None, None),
+                               ('cage_amp', 'ds_cage', self.cage.ds/sps, self.cage.C, None),
+                               ('dsdt_amp', 'dsdt', self.solvent.dsdt, self.solvent.C, None),
                                ('dsdr_amp', 'dsdr', self.solvent.dsdr, None, None)]
         self.nonlinear_labels = self.solute.par_labels
 
@@ -490,9 +492,15 @@ class SolutionScatteringModel:
 
     def prepare_vectors(self, qfit):
         # todo: proper uncertainty propagation
-        self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
-        self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
-        self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
+        # self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
+        # self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
+        # self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
+        self.cage.ds, self.cage.C = bin_vector_with_covmat(qfit, self.cage.q,
+                                                           self.cage.ds_orig, self.cage.C_orig)
+        self.solvent.dsdt, self.solvent.C = bin_vector_with_covmat(qfit, self.solvent.q,
+                                                                   self.solvent.dsdt_orig, self.solvent.C_orig)
+        self.solvent.dsdr, _              = bin_vector_with_covmat(qfit, self.solvent.q,
+                                                                   self.solvent.dsdr_orig, None)
 
 
     def prepare_parameters(self,
@@ -524,13 +532,13 @@ class SolutionScatteringModel:
             params0.add('dsdr_amp', value=0, vary=False)
         else:
             if self.solvent.dsdt_orig is None:
-                self.solvent.dsdt = np.zeros(self.solvent.q.size)
+                self.solvent.dsdt_orig = np.zeros(self.solvent.q.size)
                 params0.add('dsdt_amp', value=0, vary=False)
             else:
                 params0.add('dsdt_amp', **dsdt_dict)
 
             if self.solvent.dsdr_orig is None:
-                self.solvent.dsdr = np.zeros(self.solvent.q.size)
+                self.solvent.dsdr_orig = np.zeros(self.solvent.q.size)
                 params0.add('dsdr_amp', value=0, vary=False)
             else:
                 params0.add('dsdr_amp', **dsdr_dict)
@@ -550,14 +558,13 @@ class SolutionScatteringModel:
 
 
 def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method='gls', prefit=True,
-        direction='forward', use_prev_param0=False, exp_labels = ['ds', 'ds_err'], description=None):
+        direction='forward', use_prev_param0=False, exp_labels = ['ds', 'ds_err', 'ds_fit'], description=None):
     assert direction in ['forward','backward'], 'direction of fitting must be forward or backward'
 
     if Yt.ndim == 1: Yt = Yt[:, None]
     if K.ndim == 1: K = K[:, None]
 
-    yt_label = exp_labels[0]
-    yt_err_label = exp_labels[1]
+    yt_label, yt_err_label, y_label = exp_labels
 
     n_curves = Yt.shape[1]
     n_comp = len(problem_input)
@@ -570,7 +577,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
 
     param_labels = list(params0.keys())
     component_labels = [i[1] for i in problem_input]
-    vector_labels = component_labels + [yt_label, yt_err_label] + ['resid', 'resid_w']
+    vector_labels = component_labels + exp_labels + ['resid', 'resid_w']
     result = optimizedResult(q, t, t_str, param_labels, vector_labels, description)
 
     curve_counter = 1
@@ -582,6 +589,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
         regressor.fit(method=method, prefit=prefit)
         vector_dict = {yt_label : regressor.yt,
                        yt_err_label : np.sqrt(np.diag(regressor.Cy)),
+                       y_label : regressor.y,
                        'resid': (regressor.y - regressor.yt)[:q.size],
                        'resid_w' : regressor.result.residual[:q.size]}
         for v_label, p_label in zip(component_labels, param_labels):
@@ -677,7 +685,7 @@ class optimizedResult:
                 vals.append(self._d[each_t].params[key])
             return np.array(vals)
 
-        elif (key.split('_')[0] in self.param_labels) and (key.endswith('_err')):
+        elif ('_'.join(key.split('_')[:-1]) in self.param_labels) and (key.endswith('_err')):
             key = key[:-4]
             vals = []
             for each_t in self.t_str:

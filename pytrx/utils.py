@@ -139,6 +139,32 @@ def weighted_mean(y, K):
     return y_av, K_av
 
 
+def bin_operator(q_out, q_in):
+    assert q_in.size > q_out.size, 'the input array must be sampled more densely compared to output array'
+    assert q_in.min() < q_out.min(), 'the input array must have minimum value smaller than the minimum value of output array'
+    assert q_in.max() > q_out.max(), 'the input array must have maximum value larger than the maximum value of output array'
+
+    q_edges = q_out[:-1] + np.diff(q_out)/2
+    q_edges = np.hstack((q_out[0] - (q_out[1] - q_out[0])/2,
+                         q_edges,
+                         q_out[-1] + (q_out[-1] - q_out[-2])/2))
+    Abin = np.zeros((q_out.size, q_in.size))
+    for i in range(q_out.size):
+        q_mask_i = (q_in >= q_edges[i]) & (q_in <= q_edges[i + 1])
+        Abin[i, q_mask_i] = 1 / np.sum(q_mask_i)
+    return Abin
+
+
+def bin_vector_with_covmat(q_out, q_in, x, C):
+    if C is None:
+        C_out = None
+        x_out = np.interp(q_out, q_in, x)
+    else:
+        Abin = bin_operator(q_out, q_in)
+        x_out = Abin @ x
+        C_out = Abin @ C @ Abin.T
+    return x_out, C_out
+
 
 
 def z_num2str(z):

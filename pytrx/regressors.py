@@ -8,7 +8,7 @@ from scipy import optimize, linalg
 import lmfit
 from pytrx.utils import  cov2corr
 from pytrx.utils import weighted_mean, time_str2num, time_num2str
-
+import copy
 
 
 class MainRegressor:
@@ -96,7 +96,7 @@ class MainRegressor:
     def prepare_y_covariance(self):
         if self.method == 'wls':
             self.Cy_inv = np.diag(1/np.diag(self.Cy))
-            self.Ly = np.sqrt(np.diag(self.Cy_inv))
+            self.Ly = np.sqrt(self.Cy_inv)
         else:
             self.Cy_inv = np.linalg.inv(self.Cy)
             self.Ly = np.linalg.cholesky(self.Cy_inv)
@@ -205,8 +205,10 @@ class MainRegressor:
 
 
     def prefit(self):
-        method_hold = self.method # prefit is executed using gls regression
-        self.method = 'gls'
+        method_hold = copy.copy(self.method) # prefit is executed using gls regression
+        if method_hold == 'tls':
+            self.method = 'gls'
+
         vary_status = {key: self.params0[key].vary for key in self.params0.keys()}
         for key in self.nl_labels:
             self.params0[key].vary = False
