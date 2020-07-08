@@ -247,7 +247,7 @@ class MainRegressor:
 
         self.y = self.fit_func(self.result.params)
         self.compute_components(self.result.params)
-
+        # TODO: Jw below is not exactly the partial derivative of the fitting parameters but both fitting parameters AND component vectors. Recalculation of the jacobian for the TLS is needed. Current implementation is an APPROXIMATION!!!
         Jw = self.result.jac # weighted jacobian of residuals with respect to fitting parameters
         L_all_inv = np.linalg.inv(self.Ly.T)
         if self.method == 'tls':
