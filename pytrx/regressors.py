@@ -43,6 +43,9 @@ class MainRegressor:
         self.CVT_inv = None
         self.chol_CVT_inv = None
 
+        # auxillary flag for tls fitting
+        self._V_vary = True
+
 
     def vec(self, V):
         return V.T.ravel()
@@ -133,34 +136,38 @@ class MainRegressor:
                         self.vectors[key]['v_estimated'] = self.vectors[key]['v']
 
         else:
-            if self.CV is None: self.prepare_nonexact_covariances()
-            if self.Vt is None: self.prepare_nonexact_matrix()
-            ## prepare the parameters for estimation
+            if self._V_vary:
+                if self.CV is None: self.prepare_nonexact_covariances()
+                if self.Vt is None: self.prepare_nonexact_matrix()
+                ## prepare the parameters for estimation
 
-            b = self.get_nonexact_amplitudes(params)
-            # form the matrices for estimation
-            I = np.eye(self.m * self.n)
-            Z = np.block([[self.bigB(b)], [I]])
+                b = self.get_nonexact_amplitudes(params)
+                # form the matrices for estimation
+                I = np.eye(self.m * self.n)
+                Z = np.block([[self.bigB(b)], [I]])
 
-            Null = np.zeros((self.n * 1, self.n * self.m)) # 1 stands for the number of fitted curves
-            Oinv = np.block([[self.Cyt_inv, Null],
-                             [Null, self.CVT_inv]])
+                Null = np.zeros((self.n * 1, self.n * self.m)) # 1 stands for the number of fitted curves
+                Oinv = np.block([[self.Cyt_inv, Null],
+                                 [Null, self.CVT_inv]])
 
-            E = np.block([self.yt - self.f_exact(params),
-                          self.vec(self.Vt.T)])
-            # estimate!
-            vecVT = np.linalg.pinv(Z.T @ Oinv @ Z) @ Z.T @ Oinv @ E
+                E = np.block([self.yt - self.f_exact(params),
+                              self.vec(self.Vt.T)])
+                # estimate!
+                vecVT = np.linalg.inv(Z.T @ Oinv @ Z) @ Z.T @ Oinv @ E
 
 
-            self.V = np.reshape(vecVT, (self.n, self.m))
+                self.V = np.reshape(vecVT, (self.n, self.m))
 
-            y = self.V @ b
-            # print(self.V.shape, b.shape, y.shape)
-            idx = 0
-            for key in self.lin_labels:
-                if not self.vectors[key]['exact']:
-                    self.vectors[key]['v_estimated'] = self.V[:, idx]
-                    idx += 1
+                y = self.V @ b
+                idx = 0
+                for key in self.lin_labels:
+                    if not self.vectors[key]['exact']:
+                        self.vectors[key]['v_estimated'] = self.V[:, idx]
+                        idx += 1
+            else:
+                for key in self.lin_labels:
+                    if not self.vectors[key]['exact']:
+                        y += p[key] * self.vectors[key]['v_estimated']
 
         return y.ravel()
 
@@ -247,34 +254,33 @@ class MainRegressor:
 
         self.y = self.fit_func(self.result.params)
         self.compute_components(self.result.params)
-        # TODO: Jw below is not exactly the partial derivative of the fitting parameters but both fitting parameters AND component vectors. Recalculation of the jacobian for the TLS is needed. Current implementation is an APPROXIMATION!!!
-        Jw = self.result.jac # weighted jacobian of residuals with respect to fitting parameters
-        L_all_inv = np.linalg.inv(self.Ly.T)
-        if self.method == 'tls':
+
+        if self.method != 'tls':
+            Jw = self.result.jac # weighted jacobian of residuals with respect to fitting parameters
+            L_all_inv = np.linalg.inv(self.Ly.T)
+        else:
+            self._V_vary = False
+            res = lmfit.minimize(self.residual, self.result.params,
+                             scale_covar=False, method='least_squares')
+            Jw = res.jac
+            L_all_inv = linalg.block_diag(*(np.linalg.inv(self.Ly.T), np.linalg.inv(self.chol_CVT_inv.T)))
             b = self.get_nonexact_amplitudes(self.result.params)
             jac_ext_1 = np.hstack(tuple(each_b * self.Ly.T for each_b in b))
             jac_ext = np.vstack((jac_ext_1, self.chol_CVT_inv.T))
             Jw = np.hstack((Jw, jac_ext))
-            Jw[self.n:, :len(self.params0)] = 0
-            L_all_inv = linalg.block_diag(*(L_all_inv, np.linalg.inv(self.chol_CVT_inv.T)))
+            # Jw[self.n:, :len(self.params0)] = 0
+
         J = L_all_inv @ Jw
         Hess = Jw.T @ Jw
-        self.Cov_all = np.linalg.inv(Hess)
-        self.Cy = (J @ self.Cov_all @ J.T)[:self.n, :self.n]
+        self.Cp = np.linalg.inv(Hess)
+        p_err = np.sqrt(np.diag(self.Cp))
+        for i, key in enumerate(self.result.params.keys()):
+            self.result.params[key].stderr = p_err[i]
+
+        self.Cy = (J @ self.Cp @ J.T)[:self.n, :self.n]
 
 
 
-        # Jw_p = np.linalg.inv(self.Ly) @ self.result.jac
-
-        # J_w = opt_tls['jac']
-#         Lallinv = np.hstack((np.linalg.pinv(self.H.T), np.linalg.pinv(self.W.T)))
-#         J = Lallinv @ J_w
-#         Hess = J_w.T @ J_w
-#         Cov_all = np.linalg.pinv(Hess)
-#         idx = P0.value.size
-#         Cov_p = Cov_all[:idx, :idx]
-#         Cov_s = Cov_all[idx:, idx:]
-        # self.Cy_est =
 
 
     def check_if_tls_is_possible(self):
