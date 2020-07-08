@@ -12,10 +12,10 @@ import copy
 
 
 class MainRegressor:
-    def __init__(self, yt, Cy, problem_input, nonlinear_labels, params0):
+    def __init__(self, yt, Cyt, problem_input, nonlinear_labels, params0):
         # data input
         self.yt = yt
-        self.Cy = Cy
+        self.Cyt = Cyt
         self.n = self.yt.shape[0]
 
 
@@ -95,11 +95,11 @@ class MainRegressor:
 
     def prepare_y_covariance(self):
         if self.method == 'wls':
-            self.Cy_inv = np.diag(1/np.diag(self.Cy))
-            self.Ly = np.sqrt(self.Cy_inv)
+            self.Cyt_inv = np.diag(1/np.diag(self.Cyt))
+            self.Ly = np.sqrt(self.Cyt_inv)
         else:
-            self.Cy_inv = np.linalg.inv(self.Cy)
-            self.Ly = np.linalg.cholesky(self.Cy_inv)
+            self.Cyt_inv = np.linalg.inv(self.Cyt)
+            self.Ly = np.linalg.cholesky(self.Cyt_inv)
 
 
     def f_exact(self, params):
@@ -136,18 +136,14 @@ class MainRegressor:
             if self.CV is None: self.prepare_nonexact_covariances()
             if self.Vt is None: self.prepare_nonexact_matrix()
             ## prepare the parameters for estimation
-            b = []
-            for key in self.lin_labels:
-                if not self.vectors[key]['exact']:
-                    b.append(p[key])
-            b = np.array(b)[:, None]
 
+            b = self.get_nonexact_amplitudes(params)
             # form the matrices for estimation
             I = np.eye(self.m * self.n)
             Z = np.block([[self.bigB(b)], [I]])
 
             Null = np.zeros((self.n * 1, self.n * self.m)) # 1 stands for the number of fitted curves
-            Oinv = np.block([[self.Cy_inv, Null],
+            Oinv = np.block([[self.Cyt_inv, Null],
                              [Null, self.CVT_inv]])
 
             E = np.block([self.yt - self.f_exact(params),
@@ -167,6 +163,15 @@ class MainRegressor:
                     idx += 1
 
         return y.ravel()
+
+
+    def get_nonexact_amplitudes(self, params):
+        p = params.valuesdict()
+        b = []
+        for key in self.lin_labels:
+            if not self.vectors[key]['exact']:
+                b.append(p[key])
+        return np.array(b)[:, None]
 
 
     def compute_components(self, params):
@@ -242,6 +247,33 @@ class MainRegressor:
 
         self.y = self.fit_func(self.result.params)
         self.compute_components(self.result.params)
+
+        Jw = self.result.jac # weighted jacobian of residuals with respect to fitting parameters
+        L_all_inv = np.linalg.inv(self.Ly.T)
+        if self.method == 'tls':
+            b = self.get_nonexact_amplitudes(self.result.params)
+            jac_ext_1 = np.hstack(tuple(each_b * self.Ly.T for each_b in b))
+            jac_ext = np.vstack((jac_ext_1, self.chol_CVT_inv.T))
+            Jw = np.hstack((Jw, jac_ext))
+            Jw[self.n:, :len(self.params0)] = 0
+            L_all_inv = linalg.block_diag(*(L_all_inv, np.linalg.inv(self.chol_CVT_inv.T)))
+        J = L_all_inv @ Jw
+        Hess = Jw.T @ Jw
+        self.Cov_all = np.linalg.inv(Hess)
+        self.Cy = (J @ self.Cov_all @ J.T)[:self.n, :self.n]
+
+
+
+        # Jw_p = np.linalg.inv(self.Ly) @ self.result.jac
+
+        # J_w = opt_tls['jac']
+#         Lallinv = np.hstack((np.linalg.pinv(self.H.T), np.linalg.pinv(self.W.T)))
+#         J = Lallinv @ J_w
+#         Hess = J_w.T @ J_w
+#         Cov_all = np.linalg.pinv(Hess)
+#         idx = P0.value.size
+#         Cov_p = Cov_all[:idx, :idx]
+#         Cov_s = Cov_all[idx:, idx:]
         # self.Cy_est =
 
 
@@ -251,7 +283,7 @@ class MainRegressor:
         else: return False
 
     def check_if_gls_is_possible(self):
-        return (not np.all(np.isclose(self.Cy, np.diag(np.diag(self.Cy)))))
+        return (not np.all(np.isclose(self.Cyt, np.diag(np.diag(self.Cyt)))))
 
 
 
