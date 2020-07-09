@@ -22,7 +22,8 @@ class MainRegressor:
         # label handling
         self.nl_labels = nonlinear_labels
         self.lin_labels = []
-        self.params0 = params0
+        self.params0 = copy.deepcopy(params0)
+
 
         # problem unpacking
         self.vectors = {}
@@ -206,6 +207,7 @@ class MainRegressor:
 
 
     def residual(self, params):
+        # print([self.vectors[key]['exact'] for key in self.lin_labels])
         if self.Ly is None: self.prepare_y_covariance()
         dy_w = self.Ly.T @ (self.fit_func(params) - self.yt) # for TLS this updates self.V
         if self.method != 'tls':
@@ -270,14 +272,22 @@ class MainRegressor:
             Jw = np.hstack((Jw, jac_ext))
             # Jw[self.n:, :len(self.params0)] = 0
 
+
         J = L_all_inv @ Jw
         Hess = Jw.T @ Jw
         self.Cp = np.linalg.inv(Hess)
         p_err = np.sqrt(np.diag(self.Cp))
-        for i, key in enumerate(self.result.params.keys()):
-            self.result.params[key].stderr = p_err[i]
+        # print(self._V_vary)
+        # print(J.shape, Hess.shape, p_err.shape, self.params0.keys(), self.result.params.keys())
+
+        idx = 0
+        for key in self.result.params.keys():
+            if self.result.params[key].vary:
+                self.result.params[key].stderr = p_err[idx]
+                idx += 1
 
         self.Cy = (J @ self.Cp @ J.T)[:self.n, :self.n]
+        self.y_err = np.sqrt(np.diag(self.Cy))
 
 
 

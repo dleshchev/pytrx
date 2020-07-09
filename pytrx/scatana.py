@@ -558,13 +558,13 @@ class SolutionScatteringModel:
 
 
 def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method='gls', prefit=True,
-        direction='forward', use_prev_param0=False, exp_labels = ['ds', 'ds_err', 'ds_fit'], description=None):
+        direction='forward', use_prev_param0=False, exp_labels = ['ds', 'ds_cov', 'ds_err', 'ds_fit', 'ds_fit_cov', 'ds_fit_err'], description=None):
     assert direction in ['forward','backward'], 'direction of fitting must be forward or backward'
 
     if Yt.ndim == 1: Yt = Yt[:, None]
     if K.ndim == 1: K = K[:, None]
 
-    yt_label, yt_err_label, y_label = exp_labels
+    yt_label, Cyt_label, yt_err_label, y_label, Cy_label, y_err_label = exp_labels
 
     n_curves = Yt.shape[1]
     n_comp = len(problem_input)
@@ -588,8 +588,11 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
                                   nonlinear_labels, params0)
         regressor.fit(method=method, prefit=prefit)
         vector_dict = {yt_label : regressor.yt,
-                       yt_err_label : np.sqrt(np.diag(regressor.Cy)),
+                       Cyt_label : regressor.Cyt,
+                       yt_err_label : np.sqrt(np.diag(regressor.Cyt)),
                        y_label : regressor.y,
+                       Cy_label : regressor.Cy,
+                       y_err_label : regressor.y_err,
                        'resid': (regressor.y - regressor.yt)[:q.size],
                        'resid_w' : regressor.result.residual[:q.size]}
         for v_label, p_label in zip(component_labels, param_labels):
