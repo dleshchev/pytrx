@@ -299,7 +299,10 @@ class MainRegressor:
         else: return False
 
     def check_if_gls_is_possible(self):
-        return (not np.all(np.isclose(self.Cyt, np.diag(np.diag(self.Cyt)))))
+
+        C = self.Cyt/np.abs(self.Cyt).max()
+
+        return (not np.all(np.isclose(C, np.diag(np.diag(C)))))
 
 
 
