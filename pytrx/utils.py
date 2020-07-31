@@ -140,9 +140,9 @@ def weighted_mean(y, K):
 
 
 def bin_operator(q_out, q_in):
-    assert q_in.size > q_out.size, 'the input array must be sampled more densely compared to output array'
-    assert q_in.min() < q_out.min(), 'the input array must have minimum value smaller than the minimum value of output array'
-    assert q_in.max() > q_out.max(), 'the input array must have maximum value larger than the maximum value of output array'
+    assert q_in.size >= q_out.size, 'the input array must be sampled more densely compared to output array'
+    assert q_in.min() <= q_out.min(), 'the input array must have minimum value smaller than the minimum value of output array'
+    assert q_in.max() >= q_out.max(), 'the input array must have maximum value larger than the maximum value of output array'
 
     q_edges = q_out[:-1] + np.diff(q_out)/2
     q_edges = np.hstack((q_out[0] - (q_out[1] - q_out[0])/2,

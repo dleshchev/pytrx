@@ -101,10 +101,13 @@ class SmallMoleculeProject:
 
 
     def solvent_per_solute(self):
-        solvent = self.metadata.solvent
-        concentration = self.metadata.concentration
-        data = hydro.solvent_data[solvent]
-        return data.density / data.molar_mass / concentration
+        if (self.metadata.solvent is not None) and (self.metadata.concentration is not None):
+            solvent = self.metadata.solvent
+            concentration = self.metadata.concentration
+            data = hydro.solvent_data[solvent]
+            return data.density / data.molar_mass / concentration
+        else:
+            return 1
 
 
     def check_qrange_with_model(self, q_idx):

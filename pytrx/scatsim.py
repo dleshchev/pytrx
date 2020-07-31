@@ -42,7 +42,6 @@ class Molecule:
             print("associated_transformation is a list. Examining elements...")
             for t in associated_transformation:
                 print(f'Checking {t}')
-                # print(f'{type(t)}')
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
