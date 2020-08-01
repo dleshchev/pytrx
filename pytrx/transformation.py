@@ -200,11 +200,11 @@ class Transformation_distance_1side(Transformation):
             amplitude = self.amplitude0
         if self.reprep:
             self.prepare(xyz, Z_num)
-        xyz[self.group2] += self.unit_vec * amplitude / 2
+        xyz[self.group2] += self.unit_vec * amplitude
 
         return xyz
 
-class Transformation_distance_1side(Transformation):
+class Transformation_distance_1side_expand(Transformation):
     # Move GROUP 2 toward/away from GROUP 1 in distance, using simple mean of coordinates as
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
@@ -223,12 +223,13 @@ class Transformation_distance_1side(Transformation):
         assert (np.max(self.group2) <= len(xyz)), \
             "Index out of bound: largest index of group 2 > length of supplied molecule"
         self.group1_mean = np.mean(xyz[self.group1], 0)
-        self.group2_mean = np.mean(xyz[self.group2], 0)
-        self.unit_vec = (self.group2_mean - self.group1_mean) / np.linalg.norm(self.group2_mean - self.group1_mean)
+        # self.group2_mean = np.mean(xyz[self.group2], 0)
+        self.vecs = (xyz[self.group2] - self.group1_mean) / np.mean(np.linalg.norm(xyz[self.group2] - self.group1_mean, axis=1))
+        #self.vecs = (xyz[self.group2] - self.group1_mean) / np.linalg.norm(xyz[self.group2] - self.group1_mean, axis=1)[:,None]
         # return self
 
     def describe(self):
-        print(f'  Increasing / decreasing distance between group1 and group2 using '
+        print(f'  Increasing / decreasing distance between group1 and group2, ATOMWISE, using '
               f'simple mean of coordinates as centers.\n'
               f'  Only group 2 moves.')
         print(f'    Group 1: {self.group1}')
@@ -239,7 +240,7 @@ class Transformation_distance_1side(Transformation):
             amplitude = self.amplitude0
         if self.reprep:
             self.prepare(xyz, Z_num)
-        xyz[self.group2] += self.unit_vec * amplitude / 2
+        xyz[self.group2] += self.vecs * amplitude
 
         return xyz
 
@@ -352,7 +353,7 @@ class Transformation_rotation(Transformation):
         assert (np.max(self.group1) <= len(xyz)), \
             "Index out of bound: largest index of group 1 > length of supplied molecule"
         for i in np.arange(len(self.axis_groups)):
-            assert (np.max(self.axis_groups) <= len(xyz)), \
+            assert (np.max(self.axis_groups[i]) <= len(xyz)), \
                 "Index out of bound: largest index of group 1 > length of supplied molecule"
         self.A_mean = np.mean(xyz[self.axis_groups[0]], 0)
         self.B_mean = np.mean(xyz[self.axis_groups[1]], 0)
