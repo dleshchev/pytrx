@@ -209,6 +209,21 @@ class SmallMoleculeProject:
                            description=description)
         print('Done!')
 
+    def output_molecular_movie(self, fname):
+        n_pars = len(self.model.params0)-4
+        pars = []
+        for i in range(n_pars):
+            pars.append(self.result[f'par_es_{i+1}'])
+        pars = np.array(pars).T
+        with open(fname, 'w') as f:
+            for idx, t in enumerate(self.result.t_str):
+                Z = self.model.solute.mol_es.Z
+                XYZ = self.model.solute.mol_es.transform(pars[idx],return_xyz=True)
+                f.write(f'{len(Z)}')
+                f.write(f'\nOutput of xyz for molecule, time {t}\n')
+                for i in range(len(self.model.solute.mol_es.Z)):
+                    f.write(f'{Z[i]} {XYZ[i][0]} {XYZ[i][1]} {XYZ[i][2]}\n')
+            f.write('\n')
 
 
 ###TODO:

@@ -79,7 +79,7 @@ class Molecule:
         self.gr.calcDens()
         self.dens = self.gr.dens
 
-    def transform(self, par=None):
+    def transform(self, par=None, return_xyz=False):
 
         '''
         Transforms xyz based on the transformation supplied in the _associated_transformation.
@@ -98,6 +98,8 @@ class Molecule:
             for p, t in zip(par, self._associated_transformation):
                 # print(t)
                 self.xyz = t.transform(self.xyz, self.Z_num, p)
+        if return_xyz:
+            return self.xyz
 
     def s(self, q, pars=None):
         if not hasattr(self, '_atomic_formfactors'):
@@ -114,6 +116,14 @@ class Molecule:
         pass
 
 
+    def write_xyz(self, fname):
+        # Write the xyz (NOT xyz_ref) to an xyz file
+        with open(fname, 'w') as f:
+            f.write(f'{len(self.Z)}')
+            f.write(f'\nOutput of xyz for molecule\n')
+            for i in range(len(self.Z)):
+                f.write(f'{self.Z[i]} {self.xyz[i][0]} {self.xyz[i][1]} {self.xyz[i][2]}\n')
+            f.write('\n')
     # def sum_parameters(self):
     #     if self._associated_transformation is not None:
     #         return len(self._associated_transformation)
