@@ -22,7 +22,7 @@ from numba import njit, prange
 class Molecule:
     def __init__(self, Z, xyz,
                  calc_gr=False, rmin=0, rmax=25, dr=0.01,
-                 associated_transformation=None):
+                 associated_transformation=None, printing=True):
         '''
             associated_transformation will be either a transformation class or
             a list of transformations
@@ -34,14 +34,16 @@ class Molecule:
 
         self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
+        self.printing = printing
 
+        print(type(associated_transformation))
         print("Running initial check up for associated_transformation")
         if associated_transformation is None:
             self._associated_transformation = None
         elif type(associated_transformation) == list:
-            print("associated_transformation is a list. Examining elements...")
+            if self.printing: print("associated_transformation is a list. Examining elements...")
             for t in associated_transformation:
-                print(f'Checking {t}')
+                if self.printing: print(f'Checking {t}')
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
@@ -102,7 +104,7 @@ class Molecule:
         if not hasattr(self, '_atomic_formfactors'):
             self._atomic_formfactors = formFactor(q, self.Z)
         self.transform(pars)
-        # TODO: compute form-factors and store them in Molecule and pass them to Debye
+
         return Debye(q, self, f=self._atomic_formfactors)
 
         # return Debye(q, self)
