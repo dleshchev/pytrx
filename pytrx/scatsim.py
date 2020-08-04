@@ -16,6 +16,7 @@ import pkg_resources
 
 from pytrx import hydro
 from pytrx.transformation import Transformation
+# from pytrx import transformation
 from numba import njit, prange
 
 
@@ -35,8 +36,9 @@ class Molecule:
         self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
         self.printing = printing
+        self.par_keys = []
 
-        print(type(associated_transformation))
+        print(type(associated_transformation), Transformation)
         print("Running initial check up for associated_transformation")
         if associated_transformation is None:
             self._associated_transformation = None
@@ -47,17 +49,21 @@ class Molecule:
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
-        # elif issubclass(associated_transformation, Transformation):
             self._associated_transformation = [associated_transformation]
         else:
             raise TypeError('Supplied transformations must be None, a transformation class, or a list of it')
 
+
+        self.dispersed = any([t.dw for t in self._associated_transformation])
+
+        self.n_par = 0
         if self._associated_transformation is not None:
             for transform in self._associated_transformation:
                 transform.prepare(self.xyz, self.Z_num)
-            self.n_par = len(self._associated_transformation)
-        else:
-            self.n_par = 0
+                self.par_keys.append(transform.name)
+                self.n_par += 1
+                if transform.dw:
+                    self.n_par += transform.dw.k_par
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
@@ -94,22 +100,48 @@ class Molecule:
             # self.xyz = copy.deepcopy(self.xyz_ref)
             self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
 
-            assert (len(par) == len(self._associated_transformation)), \
-                "Number of parameters not matching number of transformations"
-            for p, t in zip(par, self._associated_transformation):
-                # print(t)
-                self.xyz = t.transform(self.xyz, self.Z_num, p)
+            # assert (len(par.keys()) == len(self._associated_transformation)), \
+            #     "Number of parameters not matching number of transformations"
+            for t in self._associated_transformation:
+
+                self.xyz = t.transform(self.xyz, self.Z_num, par[t.name])
         if return_xyz:
             return self.xyz
 
     def s(self, q, pars=None):
         if not hasattr(self, '_atomic_formfactors'):
             self._atomic_formfactors = formFactor(q, self.Z)
-        self.transform(pars)
 
-        return Debye(q, self, f=self._atomic_formfactors)
+        if not self.dispersed:
+            self.transform(pars)
+            return Debye(q, self, f=self._atomic_formfactors)
 
-        # return Debye(q, self)
+        else:
+            pd = []
+            wd = []
+            for t in self._associated_transformation:
+                if t.dw:
+                    _p, _w = t.dw.disperse(pars, t.name)
+                else:
+                    _p, _w = pars[t.name], 1
+                pd.append(_p)
+                wd.append(_w)
+
+            pd_grid = [i.ravel() for i in np.meshgrid(*pd)]
+            wd_grid = [i.ravel() for i in np.meshgrid(*wd)]
+
+            n = len(pd_grid[0]) # number of combinations
+
+            _s = np.zeros(q.shape)
+            for i in range(n):
+                _p_dict = {}
+                _w = 1
+                for j, key in enumerate(self.par_keys):
+                    _p_dict[key] = pd_grid[j][i]
+                    _w *= wd_grid[j][i]
+                self.transform(_p_dict)
+                _s += _w * Debye(q, self, f=self._atomic_formfactors)
+            return _s
 
 
     def clash(self):
