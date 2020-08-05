@@ -60,6 +60,8 @@ class Molecule:
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
+        self.q_cache = None
+
     def calcDistMat(self, return_mat=False):
         self.dist_mat = np.sqrt(np.sum((self.xyz[None, :, :] -
                                         self.xyz[:, None, :]) ** 2, axis=2))
@@ -106,7 +108,15 @@ class Molecule:
             self._atomic_formfactors = formFactor(q, self.Z)
         self.transform(pars)
         # TODO: compute form-factors and store them in Molecule and pass them to Debye
-        return Debye(q, self, f=self._atomic_formfactors)
+        if np.array_equal(self.q_cache, q):
+            return Debye(q, self, f=self._atomic_formfactors, ft=self.FFtable)
+        else:
+            self.q_cache = q
+            natoms = self.Z.size
+            self.FFtable = np.zeros((natoms, len(q)))
+            for idx in range(natoms):
+                self.FFtable[idx] = self._atomic_formfactors[self.Z[idx]]
+            return Debye(q, self, f=self._atomic_formfactors, ft=self.FFtable)
 
         # return Debye(q, self)
 
@@ -229,72 +239,22 @@ def formFactor(q, Elements):
     return f
 
 
-def Debye(q, mol, f=None, atomOnly=False, debug=False):
-    if f is None:
-        f = formFactor(q, mol.Z)
-    if debug:
-        print(f)
-    Scoh = np.zeros(q.shape)
+def Debye(q, mol, f=None, atomOnly=False, debug=False, ft=None):
     mol.calcDistMat()
     natoms = mol.Z.size
-    # Baseline speed - 164 ms
-    # for idx1 in range(natoms):
-    #     if not atomOnly:
-    #         for idx2 in range(idx1 + 1, natoms):
-    #             r12 = mol.dist_mat[idx1, idx2]
-    #             qr12 = q * r12
-    #             Scoh += 2 * f[mol.Z[idx1]] * f[mol.Z[idx2]] * np.sin(qr12) / qr12
-    #     Scoh += f[mol.Z[idx1]] ** 2
+    if ft is None:  # ft is FFtable
+        if f is None:
+            f = formFactor(q, mol.Z)
+        if debug:
+            print(f)
+        FFtable = np.zeros((natoms, len(q)))
+        for idx in range(natoms):
+            FFtable[idx] = f[mol.Z[idx]]
+    else:
+        FFtable = ft
 
-    # Trial 1 use predefined f list - 155 ms
-    # FFtable = np.zeros((natoms,len(q)))
-    # for idx in range(natoms):
-    #     FFtable[idx] = f[mol.Z[idx]]
-    # for idx1 in range(natoms):
-    #     if not atomOnly:
-    #         for idx2 in range(idx1 + 1, natoms):
-    #             r12 = mol.dist_mat[idx1, idx2]
-    #             qr12 = q * r12
-    #             Scoh += 2 * FFtable[idx1] * FFtable[idx2] * np.sin(qr12) / qr12
-    #     Scoh += f[mol.Z[idx1]] ** 2
-
-    # Trial 2 use predefined f list and broadcast - 124 ms
-    # FFtable = np.zeros((natoms, len(q)))
-    # for idx in range(natoms):
-    #     FFtable[idx] = f[mol.Z[idx]]
-    # for idx1 in range(natoms):
-    #     if atomOnly:
-    #         Scoh += f[mol.Z[idx1]] ** 2
-    #     else:
-    #         r12 = mol.dist_mat[idx1][:,None]
-    #         # print(r12.shape, q.shape)
-    #         qr12 = q[None,:] * r12
-    #         # print(qr12.shape,FFtable[idx1][None,:].shape, FFtable.shape, np.sinc(qr12/np.pi).shape)
-    #         Scoh += (FFtable[idx1][None,:] * FFtable * np.sinc(qr12 / np.pi)).sum(0)
-
-    # Trial 3 decrease usage of large matrices - 118 ms
-    # FFtable = np.zeros((natoms, len(q)))
-    # for idx in range(natoms):
-    #     FFtable[idx] = f[mol.Z[idx]]
-    # for idx1 in range(natoms):
-    #     if atomOnly:
-    #         Scoh += f[mol.Z[idx1]] ** 2
-    #     else:
-    #         r12 = mol.dist_mat[idx1][:, None]
-    #         # print(r12.shape, q.shape)
-    #         # qr12 = q[None, :] * r12
-    #         FFqr12 = np.sum(FFtable * np.sinc(q[None, :] * r12 / np.pi), axis=0)
-    #         # FFqr12 = np.nansum(FFtable * np.sin(qr12) / qr12, axis=0)
-    #         # FFqr12 = FFqr12calc(FFtable, q, r12)
-    #         # print(FFqr12.shape)
-    #         # print(qr12.shape,FFtable[idx1][None,:].shape, FFtable.shape, np.sinc(qr12/np.pi).shape)
-    #         Scoh += FFtable[idx1] * FFqr12
-
-    # Trial 4 use numba - 52 ms for Scoh_calc and 17 ms for Scoh_calc2
-    FFtable = np.zeros((natoms, len(q)))
-    for idx in range(natoms):
-        FFtable[idx] = f[mol.Z[idx]]
     if atomOnly:
+        Scoh = np.zeros(q.shape)
         for idx1 in range(natoms):
             Scoh += f[mol.Z[idx1]] ** 2
     else:
@@ -321,11 +281,12 @@ def Scoh_calc2(FF, q, r, natoms):
     # Scoh = np.zeros(q.shape)
     Scoh2 = np.zeros((natoms, len(q)))
     for idx1 in prange(natoms):
+        Scoh2[idx1] += FF[idx1] ** 2
         for idx2 in range(idx1 + 1, natoms):
             r12 = r[idx1, idx2]
             qr12 = q * r12
             Scoh2[idx1] += 2 * FF[idx1] * FF[idx2] * np.sin(qr12) / qr12
-        Scoh2[idx1] += FF[idx1] ** 2
+
     return np.sum(Scoh2, axis=0)
 
 

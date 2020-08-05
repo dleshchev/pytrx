@@ -392,7 +392,7 @@ class Transformation_rotation(Transformation):
         if len(self.axis_groups) == 2:
             xyz[self.group1] = rotation3D((xyz[self.group1] - self.A_mean).T, self.axis, amplitude).T + self.A_mean
         if len(self.axis_groups) == 3:
-            xyz[self.group1] = rotation3D((xyz[self.group1] - self.A_mean).T, self.axis, amplitude).T + self.B_mean
+            xyz[self.group1] = rotation3D((xyz[self.group1] - self.B_mean).T, self.axis, amplitude).T + self.B_mean
 
         return xyz
 
