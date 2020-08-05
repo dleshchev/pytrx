@@ -36,7 +36,7 @@ class Molecule:
         self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
         self.printing = printing
-        self.par_keys = []
+
 
         print(type(associated_transformation), Transformation)
         print("Running initial check up for associated_transformation")
@@ -56,14 +56,20 @@ class Molecule:
 
         self.dispersed = any([t.dw for t in self._associated_transformation])
 
-        self.n_par = 0
+        #
+        self._t_keys = [] # list of transformation names - for internal use
+        self.par0 = {}
         if self._associated_transformation is not None:
-            for transform in self._associated_transformation:
-                transform.prepare(self.xyz, self.Z_num)
-                self.par_keys.append(transform.name)
-                self.n_par += 1
-                if transform.dw:
-                    self.n_par += transform.dw.k_par
+            for t in self._associated_transformation:
+                t.prepare(self.xyz, self.Z_num)
+                self._t_keys.append(t.name)
+                self.par0[t.name] = t.amplitude0
+                if t.dw:
+                    dw_pars = {}
+                    for key, value in zip(t.dw.suffix, t.dw.standard_value):
+                        self.par0[t.name + key] = value
+
+        self.n_par = len(self.par0.keys())
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
@@ -82,9 +88,7 @@ class Molecule:
             self.gr[pair] += np.histogram(self.dist_mat[np.ix_(idx1, idx2)].ravel(),
                                           self.gr.r_bins)[0]
 
-    def calcDens(self):
-        self.gr.calcDens()
-        self.dens = self.gr.dens
+
 
     def transform(self, par=None, return_xyz=False):
 
@@ -112,6 +116,13 @@ class Molecule:
         if not hasattr(self, '_atomic_formfactors'):
             self._atomic_formfactors = formFactor(q, self.Z)
 
+        if pars is None:
+            pars = self.pars0
+        else:
+            assert all([key in pars.keys() for key in self.par0.keys()]), \
+                'the input parameter dict does not contain all necessary parameter keys'
+
+
         if not self.dispersed:
             self.transform(pars)
             return Debye(q, self, f=self._atomic_formfactors)
@@ -136,12 +147,13 @@ class Molecule:
             for i in range(n):
                 _p_dict = {}
                 _w = 1
-                for j, key in enumerate(self.par_keys):
+                for j, key in enumerate(self._t_keys):
                     _p_dict[key] = pd_grid[j][i]
                     _w *= wd_grid[j][i]
                 self.transform(_p_dict)
                 _s += _w * Debye(q, self, f=self._atomic_formfactors)
             return _s
+
 
 
     def clash(self):
@@ -160,6 +172,11 @@ class Molecule:
     # def sum_parameters(self):
     #     if self._associated_transformation is not None:
     #         return len(self._associated_transformation)
+
+
+    def calcDens(self):
+        self.gr.calcDens()
+        self.dens = self.gr.dens
 
 
 class GR:
@@ -357,6 +374,7 @@ def Scoh_calc2(FF, q, r, natoms):
         for idx2 in range(idx1 + 1, natoms):
             r12 = r[idx1, idx2]
             qr12 = q * r12
+            qr12[qr12<1e-9] = 1e-9
             Scoh2[idx1] += 2 * FF[idx1] * FF[idx2] * np.sin(qr12) / qr12
         Scoh2[idx1] += FF[idx1] ** 2
     return np.sum(Scoh2, axis=0)
