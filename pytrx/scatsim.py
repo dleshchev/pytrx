@@ -143,7 +143,7 @@ class Molecule:
             wd_grid = [i.ravel() for i in np.meshgrid(*wd)]
 
             n = len(pd_grid[0]) # number of combinations
-            _bla = 0
+            # _bla = 0
             _s = np.zeros(q.shape)
             for i in range(n):
                 _p_dict = {}
@@ -154,7 +154,7 @@ class Molecule:
                 self.transform(_p_dict)
                 _s += _w * Debye(q, self, f=self._atomic_formfactors)
                 _bla += _w
-            print(_bla)
+            # print(_bla)
             return _s
 
 
