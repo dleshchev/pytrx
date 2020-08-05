@@ -310,9 +310,12 @@ class Solute:
             self.n_par_total += self.mol_gs.n_par
 
         # check if the labels are not intersecting
-        n_labels_es = len(self.mol_es.par_keys)
-        n_labels_gs = len(self.mol_gs.par_keys)
-        n_labels_all = len(set(self.mol_es.par_keys + self.mol_gs.par_keys))
+        es_keys = list(self.mol_es.par0.keys())
+        gs_keys = list(self.mol_gs.par0.keys())
+
+        n_labels_es = len(es_keys)
+        n_labels_gs = len(gs_keys)
+        n_labels_all = len(set(es_keys + gs_keys))
         assert  n_labels_es + n_labels_gs == n_labels_all, \
             'parameter labels in mol_es and mol_gs must be different'
 
@@ -338,9 +341,9 @@ class Solute:
         '''
         # self.mol_es.move(*x) - consider this
         if pars is not None:
-            assert (all([p in pars.keys() for p in self.mol_es.par_keys])), \
+            assert (all([p in pars.keys() for p in self.mol_es.par0.keys()])), \
                 'key(s) for mol_es are missing in pars'
-            assert (all([p in pars.keys() for p in self.mol_gs.par_keys])), \
+            assert (all([p in pars.keys() for p in self.mol_gs.par0.keys()])), \
                 'key(s) for mol_gs are missing in pars'
             #
             # len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
@@ -515,12 +518,11 @@ class SolutionScatteringModel:
                                ('cage_amp', 'ds_cage', self.cage.ds/sps, self.cage.C, None),
                                ('dsdt_amp', 'dsdt', self.solvent.dsdt, self.solvent.C, None),
                                ('dsdr_amp', 'dsdr', self.solvent.dsdr, None, None)]
-        self.nonlinear_labels = self.solute.par_labels
+        self.nonlinear_labels = self.solute.par0.keys()
 
 
 
     def prepare_vectors(self, qfit):
-        # todo: proper uncertainty propagation
         # self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
         # self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
         # self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
@@ -571,12 +573,12 @@ class SolutionScatteringModel:
             else:
                 params0.add('dsdr_amp', **dsdr_dict)
 
-        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
-            print((lab+'_dict'), kwargs.keys(), (lab+'_dict') in kwargs.keys())
-            if (lab+'_dict') in list(kwargs.keys()):
-                params0.add(lab, **kwargs[lab + '_dict'])
+        for key in self.solute.par0.keys():
+            # print((lab+'_dict'), kwargs.keys(), (lab+'_dict') in kwargs.keys())
+            if (key+'_dict') in list(kwargs.keys()):
+                params0.add(key, **kwargs[key + '_dict'])
             else:
-                params0.add(lab, value=val)
+                params0.add(key, value=self.solute.par0[key])
 
         self.params0 = params0
 
@@ -613,7 +615,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
         starting_time = time.perf_counter()
         print('Fitting time delay', t_str[i],'\tProgress:', curve_counter, '/', n_curves, end=' \t ')
         regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
-                                  nonlinear_labels, params0)
+                                  params0, nonlinear_labels=nonlinear_labels)
         regressor.fit(method=method, prefit=prefit)
         vector_dict = {yt_label : regressor.yt,
                        Cyt_label : regressor.Cyt,

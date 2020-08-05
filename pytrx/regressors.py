@@ -12,7 +12,8 @@ import copy
 
 
 class MainRegressor:
-    def __init__(self, yt, Cyt, problem_input, nonlinear_labels, params0):
+    def __init__(self, yt, Cyt, problem_input, params0, nonlinear_labels=None):
+    # def __init__(self, yt, Cyt, problem_input, params0):
         # data input
         self.yt = yt
         self.Cyt = Cyt
@@ -108,17 +109,18 @@ class MainRegressor:
 
     def f_exact(self, params):
         p = params.valuesdict()
-        if len(self.nl_labels) != 0:
-            p_nl = [p[t] for t in self.nl_labels]
-        else:
-            p_nl = None
+        # if len(self.nl_labels) != 0:
+        #     p_nl = [p[t] for t in self.nl_labels]
+        # else:
+        #     p_nl = None
 
         y = np.zeros(self.yt.shape)
         for key in self.lin_labels:
             if self.vectors[key]['exact']:
                 v = self.vectors[key]['v']
                 if callable(v):
-                    y += p[key] * v(p_nl)
+                    # y += p[key] * v(p_nl)
+                    y += p[key] * v(p)
                 else:
                     y += p[key] * v
         return y
@@ -184,16 +186,17 @@ class MainRegressor:
 
     def compute_components(self, params):
         p = params.valuesdict()
-        if len(self.nl_labels) != 0:
-            p_nl = [p[t] for t in self.nl_labels]
-        else:
-            p_nl = None
+        # if len(self.nl_labels) != 0:
+        #     p_nl = [p[t] for t in self.nl_labels]
+        # else:
+        #     p_nl = None
 
         for key in self.lin_labels:
             if self.vectors[key]['exact']:
                 v = self.vectors[key]['v']
                 if callable(v):
-                    self.vectors[key]['v_fit'] = p[key] * v(p_nl)
+                    # self.vectors[key]['v_fit'] = p[key] * v(p_nl)
+                    self.vectors[key]['v_fit'] = p[key] * v(p)
                 else:
                     self.vectors[key]['v_fit'] = p[key] * v
             else:
@@ -219,19 +222,25 @@ class MainRegressor:
 
 
     def prefit(self):
-        method_hold = copy.copy(self.method) # prefit is executed using gls regression
-        if method_hold == 'tls':
-            self.method = 'gls'
 
-        vary_status = {key: self.params0[key].vary for key in self.params0.keys()}
-        for key in self.nl_labels:
-            self.params0[key].vary = False
-        result_pre = lmfit.minimize(self.residual, self.params0,
-                                    scale_covar=False, method='least_squares')
-        self.params0 = result_pre.params
-        for key in self.params0.keys():
-            self.params0[key].vary = vary_status[key]
-        self.method = method_hold
+        if self.nl_labels:
+            method_hold = copy.copy(self.method) # prefit is executed using gls regression
+            if method_hold == 'tls':
+                self.method = 'gls'
+
+            vary_status = {key: self.params0[key].vary for key in self.params0.keys()}
+            for key in self.nl_labels:
+                self.params0[key].vary = False
+            result_pre = lmfit.minimize(self.residual, self.params0,
+                                        scale_covar=False, method='least_squares')
+            self.params0 = result_pre.params
+            for key in self.params0.keys():
+                self.params0[key].vary = vary_status[key]
+            self.method = method_hold
+        else:
+            print('Prefit impossible because of one of the following reasons')
+            print('(1) the model does not contain non-linear part')
+            print('(2) the non-linear parameter labels are not specified')
 
 
 

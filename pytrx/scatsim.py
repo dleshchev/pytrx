@@ -53,19 +53,20 @@ class Molecule:
         else:
             raise TypeError('Supplied transformations must be None, a transformation class, or a list of it')
 
-
-        self.dispersed = any([t.dw for t in self._associated_transformation])
+        # self.dispersed
+        # self.dispersed = any([t.dw for t in self._associated_transformation])
 
         #
         self._t_keys = [] # list of transformation names - for internal use
         self.par0 = {}
+        self.dispersed = False
         if self._associated_transformation is not None:
             for t in self._associated_transformation:
                 t.prepare(self.xyz, self.Z_num)
                 self._t_keys.append(t.name)
                 self.par0[t.name] = t.amplitude0
                 if t.dw:
-                    dw_pars = {}
+                    self.dispersed = True
                     for key, value in zip(t.dw.suffix, t.dw.standard_value):
                         self.par0[t.name + key] = value
 
