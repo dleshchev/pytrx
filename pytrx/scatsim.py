@@ -16,13 +16,14 @@ import pkg_resources
 
 from pytrx import hydro
 from pytrx.transformation import Transformation
+# from pytrx import transformation
 from numba import njit, prange
 
 
 class Molecule:
     def __init__(self, Z, xyz,
                  calc_gr=False, rmin=0, rmax=25, dr=0.01,
-                 associated_transformation=None):
+                 associated_transformation=None, printing=True):
         '''
             associated_transformation will be either a transformation class or
             a list of transformations
@@ -34,33 +35,46 @@ class Molecule:
 
         self.xyz = xyz.copy()
         self.xyz_ref = xyz.copy()
+        self.printing = printing
 
+
+        print(type(associated_transformation), Transformation)
         print("Running initial check up for associated_transformation")
         if associated_transformation is None:
             self._associated_transformation = None
         elif type(associated_transformation) == list:
-            print("associated_transformation is a list. Examining elements...")
+            if self.printing: print("associated_transformation is a list. Examining elements...")
             for t in associated_transformation:
-                print(f'Checking {t}')
-                # print(f'{type(t)}')
+                if self.printing: print(f'Checking {t}')
                 assert issubclass(type(t), Transformation), 'List element is not a Transformation class'
             self._associated_transformation = associated_transformation
         elif issubclass(type(associated_transformation), Transformation):
-        # elif issubclass(associated_transformation, Transformation):
             self._associated_transformation = [associated_transformation]
         else:
             raise TypeError('Supplied transformations must be None, a transformation class, or a list of it')
 
+        # self.dispersed
+        # self.dispersed = any([t.dw for t in self._associated_transformation])
+
+        #
+        self._t_keys = [] # list of transformation names - for internal use
+        self.par0 = {}
+        self.dispersed = False
         if self._associated_transformation is not None:
-            for transform in self._associated_transformation:
-                transform.prepare(self.xyz, self.Z_num)
-            self.n_par = len(self._associated_transformation)
-        else:
-            self.n_par = 0
+            for t in self._associated_transformation:
+                t.prepare(self.xyz, self.Z_num)
+                self._t_keys.append(t.name)
+                self.par0[t.name] = t.amplitude0
+                if t.dw:
+                    self.dispersed = True
+                    for key, value in zip(t.dw.suffix, t.dw.standard_value):
+                        self.par0[t.name + key] = value
+
+        self.n_par = len(self.par0.keys())
 
         if calc_gr: self.calcGR(rmin=rmin, rmax=rmax, dr=dr)
 
-        self.q_cache = None
+        
 
     def calcDistMat(self, return_mat=False):
         self.dist_mat = np.sqrt(np.sum((self.xyz[None, :, :] -
@@ -77,9 +91,7 @@ class Molecule:
             self.gr[pair] += np.histogram(self.dist_mat[np.ix_(idx1, idx2)].ravel(),
                                           self.gr.r_bins)[0]
 
-    def calcDens(self):
-        self.gr.calcDens()
-        self.dens = self.gr.dens
+
 
     def transform(self, par=None, return_xyz=False):
 
@@ -95,30 +107,56 @@ class Molecule:
             # self.xyz = copy.deepcopy(self.xyz_ref)
             self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
 
-            assert (len(par) == len(self._associated_transformation)), \
-                "Number of parameters not matching number of transformations"
-            for p, t in zip(par, self._associated_transformation):
-                # print(t)
-                self.xyz = t.transform(self.xyz, self.Z_num, p)
+            # assert (len(par.keys()) == len(self._associated_transformation)), \
+            #     "Number of parameters not matching number of transformations"
+            for t in self._associated_transformation:
+
+                self.xyz = t.transform(self.xyz, self.Z_num, par[t.name])
         if return_xyz:
             return self.xyz
 
     def s(self, q, pars=None):
         if not hasattr(self, '_atomic_formfactors'):
             self._atomic_formfactors = formFactor(q, self.Z)
-        self.transform(pars)
-        # TODO: compute form-factors and store them in Molecule and pass them to Debye
-        if np.array_equal(self.q_cache, q):
-            return Debye(q, self, f=self._atomic_formfactors, ft=self.FFtable)
-        else:
-            self.q_cache = q
-            natoms = self.Z.size
-            self.FFtable = np.zeros((natoms, len(q)))
-            for idx in range(natoms):
-                self.FFtable[idx] = self._atomic_formfactors[self.Z[idx]]
-            return Debye(q, self, f=self._atomic_formfactors, ft=self.FFtable)
 
-        # return Debye(q, self)
+        if pars is None:
+            pars = self.pars0
+        else:
+            assert all([key in pars.keys() for key in self.par0.keys()]), \
+                'the input parameter dict does not contain all necessary parameter keys'
+
+
+        if not self.dispersed:
+            self.transform(pars)
+            return Debye(q, self, f=self._atomic_formfactors)
+
+        else:
+            pd = []
+            wd = []
+            for t in self._associated_transformation:
+                if t.dw:
+                    _p, _w = t.dw.disperse(pars, t.name)
+                else:
+                    _p, _w = pars[t.name], 1
+                pd.append(_p)
+                wd.append(_w)
+
+            pd_grid = [i.ravel() for i in np.meshgrid(*pd)]
+            wd_grid = [i.ravel() for i in np.meshgrid(*wd)]
+
+            n = len(pd_grid[0]) # number of combinations
+
+            _s = np.zeros(q.shape)
+            for i in range(n):
+                _p_dict = {}
+                _w = 1
+                for j, key in enumerate(self._t_keys):
+                    _p_dict[key] = pd_grid[j][i]
+                    _w *= wd_grid[j][i]
+                self.transform(_p_dict)
+                _s += _w * Debye(q, self, f=self._atomic_formfactors)
+            return _s
+
 
 
     def clash(self):
@@ -137,6 +175,11 @@ class Molecule:
     # def sum_parameters(self):
     #     if self._associated_transformation is not None:
     #         return len(self._associated_transformation)
+
+
+    def calcDens(self):
+        self.gr.calcDens()
+        self.dens = self.gr.dens
 
 
 class GR:
@@ -285,6 +328,7 @@ def Scoh_calc2(FF, q, r, natoms):
         for idx2 in range(idx1 + 1, natoms):
             r12 = r[idx1, idx2]
             qr12 = q * r12
+            qr12[qr12<1e-9] = 1e-9
             Scoh2[idx1] += 2 * FF[idx1] * FF[idx2] * np.sin(qr12) / qr12
 
     return np.sum(Scoh2, axis=0)

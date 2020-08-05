@@ -7,6 +7,7 @@ from pytrx.utils import weighted_mean, bin_vector_with_covmat, time_str2num, tim
 from pytrx.regressors import MainRegressor
 import lmfit
 import time
+import copy
 
 
 ## TODO:
@@ -101,10 +102,13 @@ class SmallMoleculeProject:
 
 
     def solvent_per_solute(self):
-        solvent = self.metadata.solvent
-        concentration = self.metadata.concentration
-        data = hydro.solvent_data[solvent]
-        return data.density / data.molar_mass / concentration
+        if (self.metadata.solvent is not None) and (self.metadata.concentration is not None):
+            solvent = self.metadata.solvent
+            concentration = self.metadata.concentration
+            data = hydro.solvent_data[solvent]
+            return data.density / data.molar_mass / concentration
+        else:
+            return 1
 
 
     def check_qrange_with_model(self, q_idx):
@@ -304,7 +308,19 @@ class Solute:
             self.n_par_total += self.mol_es.n_par
         if self.mol_gs is not None:
             self.n_par_total += self.mol_gs.n_par
-        self.par_labels, self.par_vals0 = self.list_pars(return_labels=True)
+
+        # check if the labels are not intersecting
+        es_keys = list(self.mol_es.par0.keys())
+        gs_keys = list(self.mol_gs.par0.keys())
+
+        n_labels_es = len(es_keys)
+        n_labels_gs = len(gs_keys)
+        n_labels_all = len(set(es_keys + gs_keys))
+        assert  n_labels_es + n_labels_gs == n_labels_all, \
+            'parameter labels in mol_es and mol_gs must be different'
+
+        self.par0 = { **self.mol_gs.par0, **self.mol_es.par0}
+        # self.par_labels, self.par_vals0 = self.list_pars(return_labels=True)
         # self.mol_es_ref = self.parse_input(input_es)
 
     def parse_input(self, input):
@@ -315,7 +331,7 @@ class Solute:
             return scatsim.fromXYZ(input)
         else:
             # Take the Molecule class
-            return input
+            return copy.deepcopy(input)
 
 
 
@@ -325,43 +341,44 @@ class Solute:
         '''
         # self.mol_es.move(*x) - consider this
         if pars is not None:
-            assert len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
-                'nummber of parameteres should match the sum of numbers of parameters for gs and es'
-            pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
-        else:
-            pars_es, pars_gs = None, None
-        if printing: print(f'ES parameters: {pars_es}, GS parameters: {pars_gs}')
+            assert (all([p in pars.keys() for p in self.mol_es.par0.keys()])), \
+                'key(s) for mol_es are missing in pars'
+            assert (all([p in pars.keys() for p in self.mol_gs.par0.keys()])), \
+                'key(s) for mol_gs are missing in pars'
+            #
+            # len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
+            #     'nummber of parameteres should match the sum of numbers of parameters for gs and es'
+            # pars_es, pars_gs = deal_pars(pars, self.mol_es.n_par)
+        # else:
+        #     pars_es, pars_gs = None, None
+        if printing: print(f'ES parameters: {self.mol_es.par_keys}, GS parameters: {self.mol_gs.par_keys}')
 
         if (self.mol_es is not None) and (self.mol_gs is not None):
-            return self.mol_es.s(q, pars_es) - self.mol_gs.s(q, pars_gs)
+            return self.mol_es.s(q, pars) - self.mol_gs.s(q, pars)
         elif self.mol_gs is not None:
-            return - self.mol_gs.s(q, pars_gs)
+            return - self.mol_gs.s(q, pars)
         elif self.mol_es is not None:
-            return self.mol_es.s(q, pars_es)
+            return self.mol_es.s(q, pars)
         else:
             return np.zeros(q.shape)
 
-    def list_pars(self, return_labels=False):
-        # Because we pass to signal() a list of parameters which is not intuitive
-        labels, standard_values = [], []
+    def list_pars(self):
+
         print(f'Listing structural parameters: \n'
               f'There are {self.n_par_total} structural parameters to be passed '
               f'to the pars argument as a list for ds method\n')
         if self.mol_es is not None:
-            for i in np.arange(self.mol_es.n_par):
-                print(f'Parameter { i +1}: ES, {type(self.mol_es._associated_transformation[i])}')
+            # for i in np.arange(self.mol_es.n_par):
+            for i, key in enumerate(self.mol_es.par_keys):
+                print(f'Parameter {key}: ES, {type(self.mol_es._associated_transformation[i])}')
                 self.mol_es._associated_transformation[i].describe()
                 print("")
-                labels.append(f'par_es_{ i +1}')
-                standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
         if self.mol_gs is not None:
             for i in np.arange(self.mol_gs.n_par):
                 print(f'Parameter { i + 1 +self.mol_es.n_par}: ES, {type(self.mol_gs._associated_transformation[i])}')
                 self.mol_gs._associated_transformation[i].describe()
                 print("")
-                labels.append(f'par_gs_{i + 1}')
-                standard_values.append(self.mol_es._associated_transformation[i].amplitude0)
-        if return_labels: return labels, standard_values
+
 
 
 
@@ -501,12 +518,11 @@ class SolutionScatteringModel:
                                ('cage_amp', 'ds_cage', self.cage.ds/sps, self.cage.C, None),
                                ('dsdt_amp', 'dsdt', self.solvent.dsdt, self.solvent.C, None),
                                ('dsdr_amp', 'dsdr', self.solvent.dsdr, None, None)]
-        self.nonlinear_labels = self.solute.par_labels
+        self.nonlinear_labels = self.solute.par0.keys()
 
 
 
     def prepare_vectors(self, qfit):
-        # todo: proper uncertainty propagation
         # self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
         # self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
         # self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
@@ -524,7 +540,6 @@ class SolutionScatteringModel:
                            dsdt_dict={'value' : 0, 'vary' : True},
                            dsdr_dict={'value' : 0, 'vary' : True},
                            **kwargs):
-        # TODO: actual interpolation operator with uncertainty propagation
 
         params0 = lmfit.Parameters()
 
@@ -558,12 +573,12 @@ class SolutionScatteringModel:
             else:
                 params0.add('dsdr_amp', **dsdr_dict)
 
-        for lab, val in zip(self.solute.par_labels, self.solute.par_vals0):
-            print((lab+'_dict'), kwargs.keys(), (lab+'_dict') in kwargs.keys())
-            if (lab+'_dict') in list(kwargs.keys()):
-                params0.add(lab, **kwargs[lab + '_dict'])
+        for key in self.solute.par0.keys():
+            # print((lab+'_dict'), kwargs.keys(), (lab+'_dict') in kwargs.keys())
+            if (key+'_dict') in list(kwargs.keys()):
+                params0.add(key, **kwargs[key + '_dict'])
             else:
-                params0.add(lab, value=val)
+                params0.add(key, value=self.solute.par0[key])
 
         self.params0 = params0
 
@@ -600,7 +615,7 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
         starting_time = time.perf_counter()
         print('Fitting time delay', t_str[i],'\tProgress:', curve_counter, '/', n_curves, end=' \t ')
         regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
-                                  nonlinear_labels, params0)
+                                  params0, nonlinear_labels=nonlinear_labels)
         regressor.fit(method=method, prefit=prefit)
         vector_dict = {yt_label : regressor.yt,
                        Cyt_label : regressor.Cyt,

@@ -10,6 +10,7 @@ A library of predefined moves for the Molecule class.
 
 import numpy as np
 import math
+import copy
 from pytrx.utils import AtomicMass
 from abc import (ABC as _ABC, abstractmethod as _abstractmethod)
 
@@ -19,8 +20,12 @@ class Transformation(_ABC):
 
     '''
 
-    def __init__(self):
-        pass
+    def __init__(self, dw=None, name=None):
+        self.dw = copy.deepcopy(dw)
+        # print('debug', name)
+        self.name = name
+        assert self.name is not None, 'Transofrmation must have name keyword that is not None'
+        assert type(self.name) == str, 'Transformation name must be a string'
 
     @_abstractmethod
     def prepare(self, xyz, Z_num):
@@ -37,13 +42,14 @@ class Transformation(_ABC):
 
 class Transformation_move_vector(Transformation):
     # Move a group of atoms along a vector (normalized)
-    def __init__(self, group1, vector, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, vector, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         self.group1 = np.array(group1)
         self.vector = np.array(vector)
         self.unit_vector = np.array(vector) / np.linalg.norm(vector)
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -66,12 +72,13 @@ class Transformation_move_vector(Transformation):
 class Transformation_group_vector(Transformation):
     # Move a group of atoms along a vector that is constructed by the center of coordinates of two other groups.
     # Vector will be from vector_group 1 to vector_group 2
-    def __init__(self, group1, vector_groups, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, vector_groups, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         self.group1 = np.array(group1)
         self.vector_groups = vector_groups
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -102,11 +109,12 @@ class Transformation_group_vector(Transformation):
 
 
 class Transformation_vibration(Transformation):
-    def __init__(self, dxyz, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, dxyz, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         self.dxyz = dxyz
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert self.dxyz.shape[0] == xyz.shape[0], \
@@ -129,13 +137,14 @@ class Transformation_distance(Transformation):
     # Move two groups of atoms closer/further in distance, using simple mean of coordinates as
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
-    def __init__(self, group1, group2, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, group2, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(group2) > 0), 'Cannot operate on empty set'
         self.group1 = np.array(group1)
         self.group2 = np.array(group2)
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -164,19 +173,19 @@ class Transformation_distance(Transformation):
 
         return xyz
 
-
 class Transformation_distance_1side(Transformation):
     # Move GROUP 2 toward/away from GROUP 1 in distance, using simple mean of coordinates as
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
     # GROUP 1 is fixed.
-    def __init__(self, group1, group2, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, group2, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(group2) > 0), 'Cannot operate on empty set'
         self.group1 = np.array(group1)
         self.group2 = np.array(group2)
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -209,13 +218,14 @@ class Transformation_distance_1side_expand(Transformation):
     # reference centers for each group.
     # Vector is from group1 to group2. Negative amplitude is shrinking.
     # GROUP 1 is fixed.
-    def __init__(self, group1, group2, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, group2, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(group2) > 0), 'Cannot operate on empty set'
         self.group1 = np.array(group1)
         self.group2 = np.array(group2)
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -248,13 +258,14 @@ class Transformation_distance_1side_expand(Transformation):
 class Transformation_distanceCOM(Transformation):
     # Move two group of atoms closer/further in distance, using center of mass as ref centers for each group
     # Vector is from group1 to group2. Negative amplitude is shrinking.
-    def __init__(self, group1, group2, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, group2, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(group2) > 0), 'Cannot operate on empty set'
         self.group1 = np.array(group1)
         self.group2 = np.array(group2)
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -292,13 +303,14 @@ class Transformation_distanceCOM_1side(Transformation):
     # Move GROUP 2 toward/away from GROUP 1 in distance, using center of mass as ref centers for each group
     # Vector is from group1 to group2. Negative amplitude is shrinking.
     # GROUP 1 is fixed.
-    def __init__(self, group1, group2, amplitude0=0, reprep=True):
-        super().__init__()
+    def __init__(self, group1, group2, amplitude0=0, reprep=True, **kwargs):
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(group2) > 0), 'Cannot operate on empty set'
         self.group1 = np.array(group1)
         self.group2 = np.array(group2)
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -330,7 +342,7 @@ class Transformation_distanceCOM_1side(Transformation):
 
 
 class Transformation_rotation(Transformation):
-    def __init__(self, group1, axis_groups, amplitude0=0, reprep=True):
+    def __init__(self, group1, axis_groups, amplitude0=0, reprep=True, **kwargs):
         # A, B, and C can be group of atoms.
         # Centers will be the mean of their coordinates.
         # If axis is length 2 (AB), use vector AB as the rotation axis
@@ -338,7 +350,7 @@ class Transformation_rotation(Transformation):
         # the cross vector of AB and BC as axis.
         # Amplitude is in degrees
         # Rotation is counterclockwise for an observer to whom the axis vector is pointing (right hand rule)
-        super().__init__()
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(axis_groups) > 0), 'Cannot operate on empty set'
         assert (len(axis_groups) == 2) or (len(axis_groups) == 3), 'Axis must be defined with 2 or 3 groups'
         for i in np.arange(len(axis_groups)):
@@ -348,6 +360,7 @@ class Transformation_rotation(Transformation):
         self.axis_groups = axis_groups
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -398,7 +411,7 @@ class Transformation_rotation(Transformation):
 
 
 class Transformation_rotationCOM(Transformation):
-    def __init__(self, group1, axis_groups, amplitude0=0, reprep=True):
+    def __init__(self, group1, axis_groups, amplitude0=0, reprep=True, **kwargs):
         # A, B, and C can be group of atoms.
         # Centers will be the mean of their coordinates.
         # If axis is length 2 (AB), use vector AB as the rotation axis
@@ -406,7 +419,7 @@ class Transformation_rotationCOM(Transformation):
         # the cross vector of AB and BC as axis.
         # Amplitude is in degrees
         # Rotation is counterclockwise for an observer to whom the axis vector is pointing (right hand rule)
-        super().__init__()
+        super().__init__(**kwargs)
         assert (len(group1) > 0) and (len(axis_groups) > 0), 'Cannot operate on empty set'
         assert (len(axis_groups) == 2) or (len(axis_groups) == 3), 'Axis must be defined with 2 or 3 groups'
         for i in np.arange(len(axis_groups)):
@@ -416,6 +429,7 @@ class Transformation_rotationCOM(Transformation):
         self.axis_groups = axis_groups
         self.amplitude0 = amplitude0
         self.reprep = reprep
+
 
     def prepare(self, xyz, Z_num):
         assert (np.max(self.group1) <= len(xyz)), \
@@ -485,3 +499,18 @@ def rotation3D(v, axis, degrees):
                         [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
 
     return np.dot(rot_mat, v)
+
+
+# this seems to fix the issues with links to the classes/subclasses
+
+all_classes = [Transformation_distance,
+               Transformation_distance_1side,
+               Transformation_distance_1side_expand,
+               Transformation_move_vector,
+               Transformation_group_vector,
+               Transformation_vibration,
+               Transformation_distanceCOM,
+               Transformation_distanceCOM_1side,
+               Transformation_rotation,
+               Transformation_rotationCOM]
+[issubclass(i, Transformation) for i in all_classes]
