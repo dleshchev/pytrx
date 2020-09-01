@@ -195,7 +195,8 @@ class SmallMoleculeProject:
 
         # prepare the model
         print('... preparing the model vectors ...')
-        self.model.prepare_model(qfit, self.solvent_per_solute())
+        self._prepare_model(qfit)
+        # self.model.prepare_model(qfit, self.metadata.solvent, self.solvent_per_solute())
 
         # generate description for the fitting round
         description = {'qmin' : qfit[0],
@@ -212,6 +213,10 @@ class SmallMoleculeProject:
                            direction=direction, use_prev_param0=use_prev_param0,
                            description=description)
         print('Done!')
+
+    def _prepare_model(self, qfit):
+        self.model.prepare_model(qfit, self.metadata.solvent, self.solvent_per_solute())
+
 
     def output_molecular_movie(self, fname):
         n_pars = len(self.model.params0)-4
@@ -413,19 +418,28 @@ class Solvent:
 class Cage:
 
     def __init__(self, input, sigma=None):
+        self.gr = None
         self.q, self.ds_orig = self.parse_input(input)
         self.C_orig = read_sigma(sigma)
 
+
     def parse_input(self, input):
+
         if type(input) == tuple:
             q, ds = input
+            return q, ds
         elif type(input) == str:
             data = np.genfromtxt(input)
             q = data[:, 0]
             ds = data[:, 1]
+            return q, ds
+        elif type(input) == scatsim.GR:
+            self.gr = input
+            return None, None
         else:
             raise ValueError('input should a tuple with (q, ds) elements or a filepath to the file with 2 columns')
-        return q, ds
+
+
 
 
 
@@ -509,8 +523,8 @@ class SolutionScatteringModel:
             raise TypeError ('invalid input type. Must be Solute, Solvent, or Cage')
 
 
-    def prepare_model(self, q, sps):
-        self.prepare_vectors(q)
+    def prepare_model(self, q, solvent, sps):
+        self.prepare_vectors(q, solvent, sps)
         def ds_solute(p):
             return self.solute.ds(q, p)/sps
 
@@ -522,12 +536,16 @@ class SolutionScatteringModel:
 
 
 
-    def prepare_vectors(self, qfit):
+    def prepare_vectors(self, qfit, solvent, sps):
         # self.cage.ds = np.interp(qfit, self.cage.q, self.cage.ds_orig)
         # self.solvent.dsdt = np.interp(qfit, self.solvent.q, self.solvent.dsdt_orig)
         # self.solvent.dsdr = np.interp(qfit, self.solvent.q, self.solvent.dsdr_orig)
-        self.cage.ds, self.cage.C = bin_vector_with_covmat(qfit, self.cage.q,
-                                                           self.cage.ds_orig, self.cage.C_orig)
+        if self.cage.gr is None:
+            self.cage.ds, self.cage.C = bin_vector_with_covmat(qfit, self.cage.q,
+                                                               self.cage.ds_orig, self.cage.C_orig)
+        else:
+            self.cage.ds = scatsim.diff_cage_from_dgr(qfit, self.cage.gr, self.solute.mol_gs, solvent)
+            self.cage.C = None
         self.solvent.dsdt, self.solvent.C = bin_vector_with_covmat(qfit, self.solvent.q,
                                                                    self.solvent.dsdt_orig, self.solvent.C_orig)
         self.solvent.dsdr, _              = bin_vector_with_covmat(qfit, self.solvent.q,
@@ -582,6 +600,9 @@ class SolutionScatteringModel:
 
         self.params0 = params0
 
+
+    def _compute_cage_signal(self):
+        ff = scatsim
 
 
 

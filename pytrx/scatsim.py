@@ -230,6 +230,13 @@ class GR:
             gr_out[pair] = self[pair] * factor
         return gr_out
 
+    def __truediv__(self, gr_other):
+        gr_out = GR(self.Z, r=self.r, el_pairs=self.el_pairs)
+        for pair in self.el_pairs:
+            gr_out[pair] = self[pair] / gr_other[pair]
+        return gr_out
+
+
     def calcDens(self):
         self.dens = np.zeros(self.r.shape)
         for pair in self.el_pairs:
@@ -280,6 +287,100 @@ def formFactor(q, Elements):
                 f[atom] = formFunc(s, coef)
 
     return f
+
+
+# def diff_cage_from_dgr(q, dgr, molecule, solvent, sps):
+#     ff = formFactor(q, dgr.Z)
+#     s = np.zeros(q.shape)
+#     r = dgr.r
+#     ksi = q[:, None] * r[None, :]
+#     ksi[ksi<1e-9] = 1e-9
+#     Asin = 4 * np.pi * (r[1] - r[0]) * (np.sin(ksi)/ksi) * r[None, :]**2
+#     data = hydro.solvent_data[solvent]
+#     V = data.molar_mass/6.02e23/(data.density/1e30) * sps
+#     for el_pair in dgr.el_pairs:
+#         if not np.all(dgr[el_pair] == 0):
+#             el1, el2 = el_pair
+#             n1 = np.sum(molecule.Z == el1) + sps * np.sum(data.Z == el1)
+#             n2 = np.sum(molecule.Z == el2) + sps * np.sum(data.Z == el2)
+#             _s = ff[el1] * ff[el2] * n1 * n2 / V * (Asin @ dgr[el_pair])
+#             s += _s
+#     return s
+
+
+def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_damp=25):
+    ff = formFactor(q, dgr.Z)
+    s = np.zeros(q.shape)
+    r = dgr.r
+    ksi = q[:, None] * r[None, :]
+    ksi[ksi < 1e-9] = 1e-9
+    #    w = np.exp(-0.5*(r/5)**2)
+    w = np.ones(r.shape)
+    w[r > r_damp] = 0
+    Asin = 4 * np.pi * (r[1] - r[0]) * (np.sin(ksi) / ksi) * r[None, :] ** 2 * w
+    solvent = hydro.solvent_data[solvent_str]
+    V = solvent.molar_mass / 6.02e23 / (solvent.density / 1e30)
+    for el1 in np.unique(molecule.Z):
+        for el2 in np.unique(solvent.Z):
+            el_pair = (el1, el2)
+            if not np.all(dgr[el_pair] == 0):
+                n1 = np.sum(molecule.Z == el1)
+                n2 = np.sum(solvent.Z == el2)
+                # print(el1, n1, el2, n2)
+                _s = ff[el1] * ff[el2] * n1 * n2 / V * (Asin @ dgr[el_pair])
+                s += _s
+    return s
+
+
+
+# def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
+#     names = np.genfromtxt(filename, delimiter=delimiter, names=True).dtype.names
+#     data = np.genfromtxt(filename, delimiter=delimiter)
+#     els = []
+#     el_pairs = []
+#     for name in names[1:]:
+#         els = name.split('_')
+#         if len(els) == 1:
+#             els = name.split('-')
+#         new_pair = [str.capitalize(i) for i in els]
+#         el_pairs.append([str.capitalize(i) for i in els])
+#         els += new_pair
+#     els = np.unique(els)
+#     gr = GR(els)
+#
+#     r = data[:, 0]
+#     for i, pair in enumerate(el_pairs):
+#         gr[els] = data[:, i + 1]
+#     gr.r = r
+#     return gr
+
+
+def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
+    names = np.genfromtxt(filename, delimiter=delimiter, names=True).dtype.names
+    data = np.genfromtxt(filename, delimiter=delimiter)
+    els = []
+    el_pairs = []
+    for name in names[1:]:
+        new_pair = name.split('_')
+        if len(new_pair) == 1:
+            new_pair = name.split('-')
+        new_pair = [str.capitalize(i) for i in new_pair]
+        el_pairs.append([str.capitalize(i) for i in new_pair])
+        els += new_pair
+    #    print(els)
+    els = np.unique(els)
+    gr = GR(els)
+    #    print(el_pairs, gr.el_pairs)
+    r = data[:, 0]
+    for i, pair in enumerate(el_pairs):
+        gr_array = data[:, i + 1]
+        if normalize:
+            rsel = (r >= rmin) & (r <= rmax)
+            gr_array /= np.mean(gr_array[rsel])
+        gr[pair] = gr_array
+
+    gr.r = r
+    return gr
 
 
 def Debye(q, mol, f=None, atomOnly=False, debug=False):
