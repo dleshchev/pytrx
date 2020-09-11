@@ -268,7 +268,7 @@ def vdWradius():
     return vdWradii
 
 
-def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False):
+def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False, cam_angle=[60,60]):
     dist_mat = mol.calcDistMat(return_mat=True)
     dist_thres = (vdWradius()[mol.Z_num][:, None] + vdWradius()[mol.Z_num]) * scaling * scaling
 
@@ -286,7 +286,7 @@ def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False):
     if not overlay:
         plt.clf()
     ax = fig.add_subplot(111, projection='3d', proj_type='ortho')
-    ax.view_init(elev=60, azim=60)
+    ax.view_init(azim=cam_angle[0], elev=cam_angle[1])
     ax.set_facecolor((0, 0, 0))
     plt.xlim((np.min(mol.xyz_ref[:, 0]), np.max(mol.xyz_ref[:, 0])))
     plt.ylim((np.min(mol.xyz_ref[:, 1]), np.max(mol.xyz_ref[:, 1])))

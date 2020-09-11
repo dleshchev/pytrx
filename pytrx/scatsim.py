@@ -120,7 +120,7 @@ class Molecule:
             self._atomic_formfactors = formFactor(q, self.Z)
 
         if pars is None:
-            pars = self.pars0
+            pars = self.par0
         else:
             assert all([key in pars.keys() for key in self.par0.keys()]), \
                 'the input parameter dict does not contain all necessary parameter keys'
@@ -282,19 +282,17 @@ def formFactor(q, Elements):
     return f
 
 
-def Debye(q, mol, f=None, atomOnly=False, debug=False, ft=None):
+def Debye(q, mol, f=None, atomOnly=False, debug=False):
     mol.calcDistMat()
     natoms = mol.Z.size
-    if ft is None:  # ft is FFtable
-        if f is None:
-            f = formFactor(q, mol.Z)
-        if debug:
-            print(f)
-        FFtable = np.zeros((natoms, len(q)))
-        for idx in range(natoms):
-            FFtable[idx] = f[mol.Z[idx]]
-    else:
-        FFtable = ft
+    if f is None:
+        f = formFactor(q, mol.Z)
+    if debug:
+        print(f)
+    Scoh = np.zeros(q.shape)
+    FFtable = np.zeros((natoms, len(q)))
+    for idx in range(natoms):
+        FFtable[idx] = f[mol.Z[idx]]
 
     if atomOnly:
         Scoh = np.zeros(q.shape)
