@@ -308,15 +308,20 @@ def formFactor(q, Elements):
 #     return s
 
 
-def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_damp=25):
+def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_cut=None):
     ff = formFactor(q, dgr.Z)
     s = np.zeros(q.shape)
     r = dgr.r
+    w = np.ones(r.shape)
+    if r_cut:
+        w[r > r_cut] = 0
+    # else:
+    #     w = np.exp(-0.5 * (r / r_damp) ** 2)
+
     ksi = q[:, None] * r[None, :]
     ksi[ksi < 1e-9] = 1e-9
     #    w = np.exp(-0.5*(r/5)**2)
-    w = np.ones(r.shape)
-    w[r > r_damp] = 0
+
     Asin = 4 * np.pi * (r[1] - r[0]) * (np.sin(ksi) / ksi) * r[None, :] ** 2 * w
     solvent = hydro.solvent_data[solvent_str]
     V = solvent.molar_mass / 6.02e23 / (solvent.density / 1e30)
