@@ -122,6 +122,8 @@ class Molecule:
         if pars is None:
             pars = self.par0
         else:
+            # print(pars)
+            # print(self.par0.keys())
             assert all([key in pars.keys() for key in self.par0.keys()]), \
                 'the input parameter dict does not contain all necessary parameter keys'
 
@@ -155,7 +157,7 @@ class Molecule:
                     _w *= wd_grid[j][i]
                 self.transform(_p_dict)
                 _s += _w * Debye(q, self, f=self._atomic_formfactors)
-                _bla += _w
+                #_bla += _w
             # print(_bla)
             return _s
 
@@ -200,7 +202,11 @@ class GR:
             self.r = r
             rmin, rmax, dr = r.min(), r.max(), r[1] - r[0]
         #        self.r_bins = np.arange(rmin-0.5*dr, rmax+1.5*dr, dr)
-        self.r_bins = np.linspace(rmin - 0.5 * dr, rmax + 0.5 * dr, (rmax - rmin) / dr + 2)
+        print(rmin, type(rmin), dr, type(dr), rmax, type(rmax))
+        # self.r_bins = np.linspace(float(rmin) - 0.5 * dr, float(rmax) + 0.5 * dr,
+        #                          int((float(rmax) - float(rmin)) / dr) + 2)
+        self.r_bins = np.linspace(float(rmin) + 0.5 * dr, float(rmax) + 0.5 * dr,
+                                  int((float(rmax) - float(rmin)) / dr) + 1)
 
         self.gr = {}
         for pair in self.el_pairs:
@@ -333,6 +339,29 @@ def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_damp=25):
                 s += _s
     return s
 
+def diff_cave_from_dgr(q, dgr, solvent_str, r_damp=25):
+    ff = formFactor(q, dgr.Z)
+    s = np.zeros(q.shape)
+    r = dgr.r
+    ksi = q[:, None] * r[None, :]
+    ksi[ksi < 1e-9] = 1e-9
+    #    w = np.exp(-0.5*(r/5)**2)
+    w = np.ones(r.shape)
+    w[r > r_damp] = 0
+    Asin = 4 * np.pi * (r[1] - r[0]) * (np.sin(ksi) / ksi) * r[None, :] ** 2 * w
+    solvent = hydro.solvent_data[solvent_str]
+    V = solvent.molar_mass / 6.02e23 / (solvent.density / 1e30)
+    for el1 in np.unique(solvent.Z):
+        for el2 in np.unique(solvent.Z):
+            el_pair = (el1, el2)
+            if not np.all(dgr[el_pair] == 0):
+                n1 = np.sum(solvent.Z == el1)
+                n2 = np.sum(solvent.Z == el2)
+                # print(el1, n1, el2, n2)
+                _s = ff[el1] * ff[el2] * n1 * n2 / V * (Asin @ dgr[el_pair])
+                s += _s
+    return s
+
 
 
 # def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
@@ -360,6 +389,7 @@ def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_damp=25):
 def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
     names = np.genfromtxt(filename, delimiter=delimiter, names=True).dtype.names
     data = np.genfromtxt(filename, delimiter=delimiter)
+    # print(data)
     els = []
     el_pairs = []
     for name in names[1:]:
@@ -371,11 +401,13 @@ def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
         els += new_pair
     #    print(els)
     els = np.unique(els)
+    # print(els)
+    # print(el_pairs)
     gr = GR(els)
     #    print(el_pairs, gr.el_pairs)
-    r = data[:, 0]
+    r = data[1:, 0]
     for i, pair in enumerate(el_pairs):
-        gr_array = data[:, i + 1]
+        gr_array = data[1:, i + 1]
         if normalize:
             rsel = (r >= rmin) & (r <= rmax)
             gr_array /= np.mean(gr_array[rsel])
