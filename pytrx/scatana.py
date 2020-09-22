@@ -114,8 +114,16 @@ class SmallMoleculeProject:
     def check_qrange_with_model(self, q_idx):
         q_in = self.data.q[q_idx]
         # q_out = q_in.copy()
-        qmin = np.max((q_in.min(), self.model.solvent.q.min(), self.model.cage.q.min()))
-        qmax = np.min((q_in.max(), self.model.solvent.q.max(), self.model.cage.q.max()))
+
+        q_exp_min, q_exp_max = q_in.min(), q_in.max()
+        q_solv_min, q_solv_max = self.model.solvent.q.min(), self.model.solvent.q.max()
+        try:
+            q_cage_min, q_cage_max = self.model.cage.q.min(), self.model.cage.q.max()
+        except:
+            q_cage_min, q_cage_max = 0, np.inf
+
+        qmin = np.max((q_exp_min, q_solv_min, q_cage_min))
+        qmax = np.min((q_exp_max, q_solv_max, q_cage_max))
 
         long_print_flag = False
         if qmin > q_in.min():
@@ -423,10 +431,11 @@ class Solvent:
 
 class Cage:
 
-    def __init__(self, input, sigma=None):
+    def __init__(self, input, sigma=None, r_cut=None):
         self.gr = None
         self.q, self.ds_orig = self.parse_input(input)
         self.C_orig = read_sigma(sigma)
+        self.r_cut = r_cut
 
 
     def parse_input(self, input):
@@ -550,7 +559,8 @@ class SolutionScatteringModel:
             self.cage.ds, self.cage.C = bin_vector_with_covmat(qfit, self.cage.q,
                                                                self.cage.ds_orig, self.cage.C_orig)
         else:
-            self.cage.ds = scatsim.diff_cage_from_dgr(qfit, self.cage.gr, self.solute.mol_gs, solvent)
+            self.cage.ds = scatsim.diff_cage_from_dgr(qfit, self.cage.gr, self.solute.mol_gs,
+                                                      solvent, r_cut=self.cage.r_cut)
             self.cage.C = None
         self.solvent.dsdt, self.solvent.C = bin_vector_with_covmat(qfit, self.solvent.q,
                                                                    self.solvent.dsdt_orig, self.solvent.C_orig)
