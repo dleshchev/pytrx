@@ -422,6 +422,36 @@ def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
     return gr
 
 
+def convert2rspace(q, dsq, alpha_damp=0.15, rmax=25, dr=0.01, molecule=None):
+    r = np.arange(0, rmax+dr, dr)
+    ksi = q[None, :] * r[:, None]
+    ksi[ksi<1e-9] = 1e-9
+    if molecule:
+        f_sharp = get_f_sharp_for_molecule(q, molecule)
+        f_sharp /= f_sharp.max()
+    else:
+        f_sharp = np.ones(q.shape)
+    w = q  * np.exp( - (alpha_damp * q)**2 ) / f_sharp
+#    plt.figure()
+#    plt.plot(q, w)
+    A_sin = w[None, :] * np.sin(ksi)
+    return r, A_sin @ dsq
+
+
+def get_f_sharp_for_molecule(q, molecule):
+    if hasattr(molecule, '_atomic_formfactors'):
+        ff = molecule._atomic_formfactors
+    else:
+        ff = formFactor(q, molecule.Z)
+    f_sharp = np.zeros(q.size)
+    for i in range(molecule.Z.size):
+        for j in range(i + 1, molecule.Z.size):
+            z_i = molecule.Z[i]
+            z_j = molecule.Z[j]
+            f_sharp += 2 * ff[z_i] * ff[z_j]
+    return f_sharp
+
+
 def Debye(q, mol, f=None, atomOnly=False, debug=False):
     mol.calcDistMat()
     natoms = mol.Z.size

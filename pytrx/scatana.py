@@ -249,10 +249,19 @@ class SmallMoleculeProject:
             f.write('\n')
 
 
+    def ft(self, alpha_damp=0.15, rmax=25, dr=0.01):
+        q_idx = np.ones(self.data.q.size, dtype=bool)
+        q_idx = check_range_with_cov_matrix(self.data.q, q_idx, self.data.diff.covqq)
+        q_ft = self.data.q[q_idx]
+        ds_target = self.data.diff.s_av[q_idx, :]
+        self.r, self.dsr = scatsim.convert2rspace(q_ft, ds_target,
+                                                  alpha_damp=alpha_damp, rmax=rmax, dr=dr,
+                                                  molecule=self.model.solute.mol_gs)
+
+
 ###TODO:
 ### this output class or SmallMoleculeProject should have plotting functions to produce pretty figures for fitting 2D maps, 1D curves for specfici time delay with decomposition of the model on solute cage and solvent
 ### one must be able to supply list of models to the SmallMoleculeProject  think about it
-### Denis keeps working on TLS
 
 
 
