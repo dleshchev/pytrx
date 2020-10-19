@@ -158,7 +158,13 @@ def bin_operator(q_out, q_in):
 def bin_vector_with_covmat(q_out, q_in, x, C):
     if C is None:
         C_out = None
-        x_out = np.interp(q_out, q_in, x)
+        if x.ndim == 1:
+            x_out = np.interp(q_out, q_in, x)
+        else:
+            x_out = []
+            for each_x in x.T:
+                x_out.append( np.interp(q_out, q_in, each_x) )
+            x_out = np.array(x_out).T
     else:
         Abin = bin_operator(q_out, q_in)
         x_out = Abin @ x
@@ -268,7 +274,7 @@ def vdWradius():
     return vdWradii
 
 
-def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False):
+def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False, ax=None, shownum=True):
     dist_mat = mol.calcDistMat(return_mat=True)
     dist_thres = (vdWradius()[mol.Z_num][:, None] + vdWradius()[mol.Z_num]) * scaling * scaling
 
@@ -285,15 +291,20 @@ def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False):
     fig = plt.figure(fignum)
     if not overlay:
         plt.clf()
-    ax = fig.add_subplot(111, projection='3d', proj_type='ortho')
-    ax.view_init(elev=60, azim=60)
-    ax.set_facecolor((0, 0, 0))
-    plt.xlim((np.min(mol.xyz_ref[:, 0]), np.max(mol.xyz_ref[:, 0])))
-    plt.ylim((np.min(mol.xyz_ref[:, 1]), np.max(mol.xyz_ref[:, 1])))
-    ax.set_zlim(np.min(mol.xyz_ref[:, 2]), np.max(mol.xyz_ref[:, 2]))
+    if ax is None:
+        ax = fig.add_subplot(111, projection='3d', proj_type='ortho')
+        ax.view_init(elev=60, azim=60)
+        ax.set_facecolor((0, 0, 0))
+        plt.xlim((np.min(mol.xyz_ref[:, 0]), np.max(mol.xyz_ref[:, 0])))
+        plt.ylim((np.min(mol.xyz_ref[:, 1]), np.max(mol.xyz_ref[:, 1])))
+        ax.set_zlim(np.min(mol.xyz_ref[:, 2]), np.max(mol.xyz_ref[:, 2]))
+
     ax.scatter(mol.xyz[:, 0], mol.xyz[:, 1], mol.xyz[:, 2],
                s=vdWradius()[mol.Z_num] * 15,
                c=AtomColor()[mol.Z_num])
+    ax.scatter(mol.xyz[:, 0], mol.xyz[:, 1], mol.xyz[:, 2],
+               s=vdWradius()[mol.Z_num] * 15)
+
     plt.axis('off')
     for row in bonds_pair:
         ax.plot([mol.xyz[row[0], 0], mol.xyz[row[1], 0]],
@@ -312,6 +323,7 @@ def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False):
                           G2_mean[1] - G1_mean[1],
                           G2_mean[2] - G1_mean[2],
                           color='r', linewidth=2)
+    return ax
 
 
 

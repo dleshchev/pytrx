@@ -18,6 +18,7 @@ from pytrx import hydro
 from pytrx.transformation import Transformation
 # from pytrx import transformation
 from numba import njit, prange
+from mpl_toolkits.mplot3d import Axes3D
 
 
 class Molecule:
@@ -37,8 +38,9 @@ class Molecule:
         self.xyz_ref = xyz.copy()
         self.printing = printing
 
+        self.reparameterized = False
 
-        print(type(associated_transformation), Transformation)
+        # print(type(associated_transformation), Transformation)
         print("Running initial check up for associated_transformation")
         if associated_transformation is None:
             self._associated_transformation = None
@@ -90,6 +92,9 @@ class Molecule:
                                           self.gr.r_bins)[0]
 
 
+    def reset_xyz(self):
+        self.xyz = self.xyz_ref.copy()  # as a numpy array we can just use the array's method
+
 
     def transform(self, par=None, return_xyz=False):
 
@@ -101,9 +106,10 @@ class Molecule:
                 by calling the prepare() methods within each class.
         '''
         if (par is not None) and (self._associated_transformation is not None):
+
             # Resets the coordinate set to be transformed
             # self.xyz = copy.deepcopy(self.xyz_ref)
-            self.xyz = self.xyz_ref.copy() # as a numpy array we can just use the array's method
+            self.reset_xyz()
 
             # assert (len(par.keys()) == len(self._associated_transformation)), \
             #     "Number of parameters not matching number of transformations"
@@ -114,6 +120,7 @@ class Molecule:
             return self.xyz
 
     def s(self, q, pars=None):
+
         if not hasattr(self, '_atomic_formfactors'):
             self._atomic_formfactors = formFactor(q, self.Z)
 
@@ -123,6 +130,8 @@ class Molecule:
             assert all([key in pars.keys() for key in self.par0.keys()]), \
                 'the input parameter dict does not contain all necessary parameter keys'
 
+        if self.reparameterized:
+            pars = self.convert(pars)
 
         if not self.dispersed:
             self.transform(pars)
@@ -153,7 +162,7 @@ class Molecule:
                     _w *= wd_grid[j][i]
                 self.transform(_p_dict)
                 _s += _w * Debye(q, self, f=self._atomic_formfactors)
-                _bla += _w
+                # _bla += _w
             # print(_bla)
             return _s
 
@@ -180,6 +189,109 @@ class Molecule:
     def calcDens(self):
         self.gr.calcDens()
         self.dens = self.gr.dens
+
+    def reparameterize(self, par_new, roi_dict, n=11, plotting=False):
+        if self.dispersed:
+            raise ValueError('dispersed transformations are incompatible with reparameterization')
+        assert self.n_par == len(par_new), 'number of new parameters must match the number of original parameters'
+        self._pc = ParameterConverter(self, par_new)
+        self._pc.define_conversion(roi_dict, n, plotting=plotting)
+        self.reparameterized = True
+
+        # re-"brand" the parameters:
+        self.reset_xyz()
+        self.par0 = self._pc.compute_pars(return_type=dict)
+        self._t_keys = list(self.par0.keys())
+
+    def convert(self, x):
+        return self._pc.convert(x)
+
+        # x_ar = np.array([x[key] for key in x.keys()])
+        # x_ar = np.hstack((x_ar, [1]))
+        # #        print(x_ar, self.R.shape)
+        #
+        # y_out = x_ar @ self._pc.R
+        # return dict(zip([t.name for t in self._associated_transformation], y_out))
+
+
+
+
+
+class ParameterConverter:
+    def __init__(self, molecule, pars):
+        self.mol = molecule
+        self.pars = pars # parameters to which we reparameterize
+
+        self.t_labels = list(self.mol.par0.keys())
+        self.R = None
+
+    def compute_pars(self, return_type=list):
+        out = []
+        for p in self.pars:
+            if p['type'] == 'distance':
+                idx1, idx2 = p['group1'], p['group2']
+                xyz1 = np.mean(self.mol.xyz[idx1, :], axis=0)
+                xyz2 = np.mean(self.mol.xyz[idx2, :], axis=0)
+                r = np.linalg.norm(xyz1 - xyz2)
+                out.append(r)
+            elif p['type'] == 'angle':
+                idx1, idx2 = p['group1'], p['group2']
+                n1 = self._get_normal(self.mol.xyz[idx1, :])
+                n2 = self._get_normal(self.mol.xyz[idx2, :])
+                phi = np.arccos(np.sum(n1 * n2))
+                out.append(np.rad2deg(phi))
+        if return_type == list:
+            return out
+        elif return_type == dict:
+            return dict(zip([p['label'] for p in self.pars], out))
+
+    def _get_normal(self, xyz):
+        if len(xyz) == 2:
+            n = xyz[0, :] - xyz[1, :]
+        else:
+            #            print(xyz)
+            n, _, _, _ = np.linalg.lstsq(xyz, np.ones(len(xyz)), rcond=-1)
+        return n / np.linalg.norm(n)
+
+    def compute_grid(self, roi, n):
+        roi_grid = {}
+        for key in roi.keys():
+            x1, x2 = roi[key][0], roi[key][1]
+            roi_grid[key] = np.linspace(x1, x2, n)
+
+        grid = np.meshgrid(*[roi_grid[key] for key in self.t_labels])
+        return [i.ravel() for i in grid]
+
+    def define_conversion(self, roi, n, plotting=True):
+        grid_out = self.compute_grid(roi, n)
+        #        print(grid)
+        grid_in = []
+        for vals in zip(*grid_out):
+            _p = dict(zip(self.t_labels, vals))
+            self.mol.transform(_p)
+            out = self.compute_pars()
+            grid_in.append(out)
+        grid_in = np.array(grid_in)
+        grid_out = np.array(grid_out).T
+        grid_in = np.hstack((grid_in,
+                             np.ones((grid_in.shape[0], 1))))
+        # print(grid_in.shape, grid_out.shape)
+        self.R, _, _, _ = np.linalg.lstsq(grid_in, grid_out, rcond=-1)
+
+        if plotting:
+            grid_out_pred = grid_in @ self.R
+            fig = plt.figure()
+            plt.clf()
+            ax = fig.gca(projection='3d')
+
+            ax.plot(grid_in[:, 0], grid_in[:, 1], grid_out[:, 0], 'k.')
+            ax.plot(grid_in[:, 0], grid_in[:, 1], grid_out_pred[:, 0], 'r.')
+
+    def convert(self, x):
+        x_ar = np.array([x[key] for key in x.keys() if key in self.mol._t_keys])
+        x_ar = np.hstack((x_ar, [1]))
+        y_out = x_ar @ self.R
+        return dict(zip([t.name for t in self.mol._associated_transformation], y_out))
 
 
 class GR:
@@ -246,6 +358,18 @@ class GR:
             self.dens += z1 * z2 * self.gr[frozenset(pair)]
 
 
+    def save(self, fname):
+        n = self.r.size
+        m = len(self.el_pairs)
+        header = 'r, ' + ', '.join([ '-'.join([i for i in pair]) for pair in self.el_pairs])
+        data = np.zeros((n, m + 1))
+        data[:, 0] = self.r
+        for i, pair in enumerate(self.el_pairs):
+            if not np.all(np.isnan(self[pair])):
+                data[:, i + 1] = self[pair]
+        np.savetxt(fname, data, delimiter=', ', header=header)
+
+
 ### UTILS
 
 
@@ -289,24 +413,6 @@ def formFactor(q, Elements):
     return f
 
 
-# def diff_cage_from_dgr(q, dgr, molecule, solvent, sps):
-#     ff = formFactor(q, dgr.Z)
-#     s = np.zeros(q.shape)
-#     r = dgr.r
-#     ksi = q[:, None] * r[None, :]
-#     ksi[ksi<1e-9] = 1e-9
-#     Asin = 4 * np.pi * (r[1] - r[0]) * (np.sin(ksi)/ksi) * r[None, :]**2
-#     data = hydro.solvent_data[solvent]
-#     V = data.molar_mass/6.02e23/(data.density/1e30) * sps
-#     for el_pair in dgr.el_pairs:
-#         if not np.all(dgr[el_pair] == 0):
-#             el1, el2 = el_pair
-#             n1 = np.sum(molecule.Z == el1) + sps * np.sum(data.Z == el1)
-#             n2 = np.sum(molecule.Z == el2) + sps * np.sum(data.Z == el2)
-#             _s = ff[el1] * ff[el2] * n1 * n2 / V * (Asin @ dgr[el_pair])
-#             s += _s
-#     return s
-
 
 def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_cut=None):
     ff = formFactor(q, dgr.Z)
@@ -338,30 +444,8 @@ def diff_cage_from_dgr(q, dgr, molecule, solvent_str, r_cut=None):
 
 
 
-# def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
-#     names = np.genfromtxt(filename, delimiter=delimiter, names=True).dtype.names
-#     data = np.genfromtxt(filename, delimiter=delimiter)
-#     els = []
-#     el_pairs = []
-#     for name in names[1:]:
-#         els = name.split('_')
-#         if len(els) == 1:
-#             els = name.split('-')
-#         new_pair = [str.capitalize(i) for i in els]
-#         el_pairs.append([str.capitalize(i) for i in els])
-#         els += new_pair
-#     els = np.unique(els)
-#     gr = GR(els)
-#
-#     r = data[:, 0]
-#     for i, pair in enumerate(el_pairs):
-#         gr[els] = data[:, i + 1]
-#     gr.r = r
-#     return gr
-
-
 def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
-    names = np.genfromtxt(filename, delimiter=delimiter, names=True).dtype.names
+    names = np.genfromtxt(filename, delimiter=delimiter, names=True, deletechars=',').dtype.names
     data = np.genfromtxt(filename, delimiter=delimiter)
     els = []
     el_pairs = []
@@ -372,16 +456,18 @@ def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
         new_pair = [str.capitalize(i) for i in new_pair]
         el_pairs.append([str.capitalize(i) for i in new_pair])
         els += new_pair
-    #    print(els)
+
     els = np.unique(els)
     gr = GR(els)
-    #    print(el_pairs, gr.el_pairs)
+
     r = data[:, 0]
     for i, pair in enumerate(el_pairs):
         gr_array = data[:, i + 1]
         if normalize:
             rsel = (r >= rmin) & (r <= rmax)
-            gr_array /= np.mean(gr_array[rsel])
+            c = np.mean(gr_array[rsel])
+            if c != 0:
+                gr_array /= c
         gr[pair] = gr_array
 
     gr.r = r
