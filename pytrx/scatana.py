@@ -1,8 +1,9 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from pytrx.scatdata import ScatData
-from pytrx import scatsim, hydro
+from scipy import optimize, linalg
+# from pytrx.scatdata import ScatData
+from pytrx import scatdata, scatsim, hydro
 from pytrx.utils import weighted_mean, bin_vector_with_covmat, time_str2num, time_num2str
 from pytrx.regressors import MainRegressor
 import lmfit
@@ -46,8 +47,8 @@ class SmallMoleculeProject:
         '''
         print(type(input_data))
         if type(input_data) == str:
-            self.data = ScatData(input_data, smallLoad=True)
-        elif type(input_data) == ScatData:
+            self.data = scatdata.ScatData(input_data, smallLoad=True)
+        elif type(input_data) == scatdata.ScatData:
 
             print('Inputting ScatData data')
             self.data = input_data
@@ -59,7 +60,7 @@ class SmallMoleculeProject:
         self.metadata = Metadata(**kwargs)
 
 
-    def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
+    def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None, return_scale=False):
         '''
 
         Args:
@@ -92,13 +93,16 @@ class SmallMoleculeProject:
 
         if plotting:
             plt.figure(fig)
-            plt.clf()
+            # plt.clf()
             plt.plot(q, s_off *scale, 'k-', label=('data (' + str(self.data.diff.toff_str) + ')'))
             plt.plot(q, s_th, 'r--', label='solvent (gas)')
             plt.xlabel('q, 1/A')
             plt.ylabel('S(q), e.u.')
             plt.legend()
             plt.xlim(q.min(), q.max())
+
+        if return_scale:
+            return scale
 
 
     def solvent_per_solute(self):
@@ -472,7 +476,7 @@ class Background:
     def __init__(self, input, qmin=None, qmax=None, tmin=None, tmax=None, n_cmp=3, plotting=False):
         if type(input) == tuple:
             self.q, self.ds_orig = input
-        elif type(input) == ScatData:
+        elif type(input) == scatdata.ScatData:
             data = input
             if tmin is None: tmin = data.t.min()
             if tmax is None: tmax = data.t.max()
@@ -722,12 +726,16 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
     result = optimizedResult(q, t, t_str, param_labels, vector_labels, description)
 
     curve_counter = 1
+
+    # Js = []
+
     for i in i_generator:
         starting_time = time.perf_counter()
         print('Fitting time delay', t_str[i],'\tProgress:', curve_counter, '/', n_curves, end=' \t ')
         regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
                                   params0, nonlinear_labels=nonlinear_labels)
         regressor.fit(method=method, prefit=prefit)
+        # Js.append(regressor.J)
         vector_dict = {yt_label : regressor.yt,
                        Cyt_label : regressor.Cyt,
                        yt_err_label : np.sqrt(np.diag(regressor.Cyt)),
@@ -748,6 +756,12 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
 
         print('took %0.0f' %((time.perf_counter() - starting_time)*1e3), 'ms')
         curve_counter += 1
+
+    # bigJ = linalg.block_diag(*Js)
+    # Cqqtt_inv = np.kron(np.linalg.inv(C), np.linalg.inv(K))
+    # Hpptt = bigJ.T @ Cqqtt_inv @ bigJ
+    # Cpptt = np.linalg.inv(Hpptt)
+    # print(np.sqrt(np.diag(Cpptt)), regressor.p_err)
 
     return result
 
@@ -782,6 +796,13 @@ class optimizedResult:
                             ['chisq', 'chisq_red'] + ['q', 't', 't_str'])
         self.description_dict = description
 
+    def __deepcopy__(self, memodict={}):
+        out = optimizedResult(self.q, self.t, self.t_str, self.param_labels, self.vector_labels,
+                               self.description_dict)
+        for each_t_str in self.t_str:
+            out[each_t_str] = copy.deepcopy(self[each_t_str])
+        return out
+
 
     def __repr__(self):
         _d = self.description_dict
@@ -805,7 +826,6 @@ class optimizedResult:
             self._d[key_num] = entry
         except ValueError:
             pass
-
 
 
 

@@ -1178,11 +1178,11 @@ def rescaleQ(q_old, wavelength, dist_old, dist_new):
     return 4 * pi / wavelength * np.sin(tth_new / 2)
 
 
-def distribute_Mat2ScatData(matfile, t_factor=1e-12):
+def distribute_Mat2ScatData(matfile, t_factor=1e-12, t_offset=0):
     data = ScatData(None)
     matdata = scipy.io.loadmat(matfile)
     data.q = matdata['data']['q'][0][0].squeeze()
-    data.t = matdata['data']['t'][0][0].squeeze()*t_factor
+    data.t = matdata['data']['t'][0][0].squeeze()*t_factor - t_offset
     data.t_str = np.array([time_num2str(i) for i in data.t])
     data.diff.s_av = matdata['data']['ds0'][0][0]
     # data.diff.s = np.copy(data.diff.s)  # Allow both s and ds be used

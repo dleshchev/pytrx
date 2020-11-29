@@ -288,7 +288,9 @@ class ParameterConverter:
             ax.plot(grid_in[:, 0], grid_in[:, 1], grid_out_pred[:, 0], 'r.')
 
     def convert(self, x):
-        x_ar = np.array([x[key] for key in x.keys() if key in self.mol._t_keys])
+        # print('BLABLABLA')
+        # print(x)
+        x_ar = np.array([float(x[key]) for key in x.keys() if key in self.mol._t_keys])
         x_ar = np.hstack((x_ar, [1]))
         y_out = x_ar @ self.R
         return dict(zip([t.name for t in self.mol._associated_transformation], y_out))
