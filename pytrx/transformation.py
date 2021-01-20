@@ -368,6 +368,7 @@ class Transformation_rotation(Transformation):
         for i in np.arange(len(self.axis_groups)):
             assert (np.max(self.axis_groups[i]) <= len(xyz)), \
                 "Index out of bound: largest index of group 1 > length of supplied molecule"
+        self.group1_mean = np.mean(xyz[self.group1], 0)
         self.A_mean = np.mean(xyz[self.axis_groups[0]], 0)
         self.B_mean = np.mean(xyz[self.axis_groups[1]], 0)
         if len(self.axis_groups) == 3:
@@ -476,7 +477,7 @@ class Transformation_rotationCOM(Transformation):
         if len(self.axis_groups) == 2:
             xyz[self.group1] = rotation3D((xyz[self.group1] - self.A_COM).T, self.axis, amplitude).T + self.A_COM
         if len(self.axis_groups) == 3:
-            xyz[self.group1] = rotation3D((xyz[self.group1] - self.A_COM).T, self.axis, amplitude).T + self.B_COM
+            xyz[self.group1] = rotation3D((xyz[self.group1] - self.B_COM).T, self.axis, amplitude).T + self.B_COM
 
         return xyz
 
