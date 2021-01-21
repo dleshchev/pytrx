@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import solveh_banded
 # from pytrx.transformation import *
-
+from scipy.interpolate import interp1d
 
 
 class DataContainer:
@@ -208,6 +208,74 @@ def convolutedStep(t, tzero, fwhm):
    return (1/2 * (1 + erf(val)))
 
 
+def assym_gauss(x, amp, x_zero, sigma_L, sigma_R):
+    output = np.zeros(x.shape)
+    x = x - x_zero
+    output[x <= 0] = np.exp(-x[x <= 0] ** 2 / (2 * sigma_L ** 2))
+    output[x >= 0] = np.exp(-x[x >= 0] ** 2 / (2 * sigma_R ** 2))
+    return output * amp
+
+
+def _pulse_shape(x, amp1, amp2, amp3, amp4,
+               tz1, tz2, tz3, tz4,
+               sl1, sl2, sl3, sl4,
+               sr1, sr2, sr3, sr4):
+    return (assym_gauss(x, amp1, tz1, sl1, sr1) +
+            assym_gauss(x, amp2, tz2, sl2, sr2) +
+            assym_gauss(x, amp3, tz3, sl3, sr3) +
+            assym_gauss(x, amp4, tz4, sl4, sr4))
+
+
+def pulse_profile(fwhm, shape='id09'):
+    # def xrayPulseProfile(fwhm, shape='gauss'):
+    if shape == 'gauss':
+        sigma = fwhm / 2.355
+        t = np.linspace(-1, 1, 151) * 5
+        h = np.exp(- (t / (np.sqrt(2))) ** 2)
+        t *= sigma
+    elif shape == 'id09':
+
+
+        params = [0.25658488, 0.18297786, 0.76292762, 0.69525572,  # amplitudes
+                  -46.08440552, 54.83370414, -23.70876518, 18.33081068,  # time zeros
+                  9.5657804, 19.73970962, 16.51307652, 24.68971104,  # left sigmas
+                  10.36663466, 17.0784876, 22.77630371, 25.49143015]  # right sigmas
+        t = np.linspace(-1, 1.2, 151) * 99.2640 / 2.355 * 4
+        h = _pulse_shape(t, *params)
+        t = (t + 10.2956) / 99.2640 * fwhm
+    else:
+        raise ValueError('shape can be only "gauss" or "id09"')
+    h /= np.trapz(h, t)
+    return t, h
+
+def numerical_convolution(t, s, delays, tzero, fwhm, shape='id09'):
+    if len(s.shape) == 1:
+        s = s[:, np.newaxis]
+    ncurves = s.shape[1]
+    s_conv = np.zeros((delays.size, ncurves))
+    tmin = t.min()
+    t_h, h = pulse_profile(fwhm, shape=shape)
+    for j in range(ncurves):
+        interpolator = interp1d(t, s[:, j], kind='cubic')
+        for i, delay in enumerate(delays):
+            t_h_local = t_h + delay - tzero
+            # handling crossing of time-zero (this drastically improves the accuracy of convolution):
+            if (tmin > t_h_local.min()) and (tmin < t_h_local.max()):
+                h_tmin = np.interp(tmin, t_h_local, h)
+                t_h_local = np.hstack((t_h_local, tmin))
+                h_local = np.hstack((h, h_tmin))
+                h_local = h_local[np.argsort(t_h_local)]
+                t_h_local = np.sort(t_h_local)
+                h_local = h_local / np.trapz(h_local, t_h_local)
+            else:
+                h_local = h
+            h_local = h_local[t_h_local >= tmin]
+            t_h_local = t_h_local[t_h_local >= tmin]
+
+            if t_h_local.size > 0:
+                s_conv[i, j] = np.trapz(interpolator(t_h_local) * h_local, t_h_local)
+    return s_conv
+
 def AtomColor():
     AtomColors = np.array([(0, 0, 0),  # Avoid atomic number to index conversion
                         (255, 255, 255), (217, 255, 255), (204, 128, 255),
@@ -274,7 +342,7 @@ def vdWradius():
     return vdWradii
 
 
-def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False, ax=None, shownum=True):
+def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False, ax=None, shownum=True, cam_angle=(60, 60)):
     dist_mat = mol.calcDistMat(return_mat=True)
     dist_thres = (vdWradius()[mol.Z_num][:, None] + vdWradius()[mol.Z_num]) * scaling * scaling
 
@@ -293,7 +361,8 @@ def DrawMolecule(mol, draw_par=False, scaling=1.15, fignum=10, overlay=False, ax
         plt.clf()
     if ax is None:
         ax = fig.add_subplot(111, projection='3d', proj_type='ortho')
-        ax.view_init(elev=60, azim=60)
+        elev, azim = cam_angle
+        ax.view_init(elev=elev, azim=azim)
         ax.set_facecolor((0, 0, 0))
         plt.xlim((np.min(mol.xyz_ref[:, 0]), np.max(mol.xyz_ref[:, 0])))
         plt.ylim((np.min(mol.xyz_ref[:, 1]), np.max(mol.xyz_ref[:, 1])))
