@@ -222,7 +222,7 @@ class MainRegressor:
 
 
     def prefit(self):
-
+        # print(self.params0)
         if self.nl_labels:
             method_hold = copy.copy(self.method) # prefit is executed using gls regression
             if method_hold == 'tls':
@@ -286,6 +286,10 @@ class MainRegressor:
         Hess = Jw.T @ Jw
         self.Cp = np.linalg.inv(Hess)
         p_err = np.sqrt(np.diag(self.Cp))
+
+        self.J = J
+        self.p_err = p_err
+
         # print(self._V_vary)
         # print(J.shape, Hess.shape, p_err.shape, self.params0.keys(), self.result.params.keys())
 

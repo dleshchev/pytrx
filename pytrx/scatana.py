@@ -1,8 +1,9 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from pytrx.scatdata import ScatData
-from pytrx import scatsim, hydro
+from scipy import optimize, linalg
+# from pytrx.scatdata import ScatData
+from pytrx import scatdata, scatsim, hydro
 from pytrx.utils import weighted_mean, bin_vector_with_covmat, time_str2num, time_num2str
 from pytrx.regressors import MainRegressor
 import lmfit
@@ -46,8 +47,8 @@ class SmallMoleculeProject:
         '''
         print(type(input_data))
         if type(input_data) == str:
-            self.data = ScatData(input_data, smallLoad=True)
-        elif type(input_data) == ScatData:
+            self.data = scatdata.ScatData(input_data, smallLoad=True)
+        elif type(input_data) == scatdata.ScatData:
 
             print('Inputting ScatData data')
             self.data = input_data
@@ -59,7 +60,7 @@ class SmallMoleculeProject:
         self.metadata = Metadata(**kwargs)
 
 
-    def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None):
+    def scale(self, qNormRange=None, plotting=True, fig=None, idx_off=None, return_scale=False):
         '''
 
         Args:
@@ -92,13 +93,16 @@ class SmallMoleculeProject:
 
         if plotting:
             plt.figure(fig)
-            plt.clf()
+            # plt.clf()
             plt.plot(q, s_off *scale, 'k-', label=('data (' + str(self.data.diff.toff_str) + ')'))
             plt.plot(q, s_th, 'r--', label='solvent (gas)')
             plt.xlabel('q, 1/A')
             plt.ylabel('S(q), e.u.')
             plt.legend()
             plt.xlim(q.min(), q.max())
+
+        if return_scale:
+            return scale
 
 
     def solvent_per_solute(self):
@@ -338,16 +342,23 @@ class Solute:
             self.n_par_total += self.mol_gs.n_par
 
         # check if the labels are not intersecting
-        es_keys = list(self.mol_es.par0.keys())
-        gs_keys = list(self.mol_gs.par0.keys())
+        if (self.mol_gs is not None) and (self.mol_es is not None):
+            es_keys = list(self.mol_es.par0.keys())
+            gs_keys = list(self.mol_gs.par0.keys())
 
-        n_labels_es = len(es_keys)
-        n_labels_gs = len(gs_keys)
-        n_labels_all = len(set(es_keys + gs_keys))
-        assert  n_labels_es + n_labels_gs == n_labels_all, \
-            'parameter labels in mol_es and mol_gs must be different'
+            n_labels_es = len(es_keys)
+            n_labels_gs = len(gs_keys)
+            n_labels_all = len(set(es_keys + gs_keys))
+            assert  n_labels_es + n_labels_gs == n_labels_all, \
+                'parameter labels in mol_es and mol_gs must be different'
 
-        self.par0 = { **self.mol_gs.par0, **self.mol_es.par0}
+        self.par0 = {}
+        if (self.mol_gs is not None):
+            self.par0 = {**self.mol_gs.par0, **self.par0}
+        if (self.mol_es is not None):
+            self.par0 = {**self.mol_es.par0, **self.par0}
+
+        # self.par0 = { **self.mol_gs.par0, **self.mol_es.par0}
         # self.par_labels, self.par_vals0 = self.list_pars(return_labels=True)
         # self.mol_es_ref = self.parse_input(input_es)
 
@@ -369,10 +380,12 @@ class Solute:
         '''
         # self.mol_es.move(*x) - consider this
         if pars is not None:
-            assert (all([p in pars.keys() for p in self.mol_es.par0.keys()])), \
-                'key(s) for mol_es are missing in pars'
-            assert (all([p in pars.keys() for p in self.mol_gs.par0.keys()])), \
-                'key(s) for mol_gs are missing in pars'
+            if self.mol_es is not None:
+                assert (all([p in pars.keys() for p in self.mol_es.par0.keys()])), \
+                        'key(s) for mol_es are missing in pars'
+            if self.mol_gs is not None:
+                assert (all([p in pars.keys() for p in self.mol_gs.par0.keys()])), \
+                    'key(s) for mol_gs are missing in pars'
             #
             # len(pars) == (self.mol_es.n_par + self.mol_gs.n_par), \
             #     'nummber of parameteres should match the sum of numbers of parameters for gs and es'
@@ -465,6 +478,45 @@ class Cage:
 
 
 
+class Background:
+    def __init__(self, input, qmin=None, qmax=None, tmin=None, tmax=None, n_cmp=3, plotting=False):
+        if type(input) == tuple:
+            self.q, self.ds_orig = input
+        elif type(input) == scatdata.ScatData:
+            data = input
+            if tmin is None: tmin = data.t.min()
+            if tmax is None: tmax = data.t.max()
+            if qmin is None: qmin = data.q.min()
+            if qmax is None: qmax = data.q.max()
+            qsel = (data.q >= qmin) & (data.q <= qmax)
+            tsel = (data.t >= tmin) & (data.t <= tmax)
+            self.q = data.q[qsel]
+            _ds = data.diff.s_av[np.ix_(qsel, tsel)]
+            self.ds_orig = self.extract_components(_ds, n_cmp, plotting=plotting)
+        if self.ds_orig.ndim == 1:
+            self.n_cmp = 1
+            self.ds_orig = self.ds_orig[:, None]
+        else:
+            self.n_cmp = self.ds_orig.shape[1]
+
+
+
+    def extract_components(self, ds, n_cmp, plotting=False):
+        u, s, v = np.linalg.svd(ds)
+        if plotting:
+            plt.figure()
+            plt.subplot(131)
+            plt.semilogy(s, 'ksq-')
+
+            plt.subplot(132)
+            plt.plot(u[:, :n_cmp])
+
+            plt.subplot(133)
+            plt.plot(v[:, :n_cmp])
+
+        return u[:, :n_cmp]
+
+
 
 
 
@@ -505,6 +557,7 @@ _esf_dict= {'value' : 0, 'vary' : True}
 _cage_dict = {'value' : 1, 'vary' : False}
 _dsdt_dict = {'value' : 0, 'vary' : True}
 _dsdr_dict = {'value' : 0, 'vary' : True}
+_bkg_dict = {'value' : 0, 'vary' : True}
 
 
 
@@ -518,16 +571,19 @@ class SolutionScatteringModel:
                  cage_dict=_cage_dict,
                  dsdt_dict=_dsdt_dict,
                  dsdr_dict=_dsdr_dict,
+                 bkg_dict=_bkg_dict,
                  **kwargs):
         self.solute = None
         self.solvent = None
         self.cage = None
+        self.background = None
         self.add(*args)
         self.label = label
         self.prepare_parameters(esf_dict=esf_dict,
                                 cage_dict=cage_dict,
                                 dsdt_dict=dsdt_dict,
                                 dsdr_dict=dsdr_dict,
+                                bkg_dict=_bkg_dict,
                                 **kwargs)
 
 
@@ -543,8 +599,10 @@ class SolutionScatteringModel:
             self.solvent = item
         elif type(item) == Cage:
             self.cage = item
+        elif type(item) == Background:
+            self.background = item
         else:
-            raise TypeError ('invalid input type. Must be Solute, Solvent, or Cage')
+            raise TypeError ('invalid input type. Must be Solute, Solvent, Cage, or Background')
 
 
     def prepare_model(self, q, solvent, sps):
@@ -556,6 +614,13 @@ class SolutionScatteringModel:
                                ('cage_amp', 'ds_cage', self.cage.ds/sps, self.cage.C, None),
                                ('dsdt_amp', 'dsdt', self.solvent.dsdt, self.solvent.C, None),
                                ('dsdr_amp', 'dsdr', self.solvent.dsdr, None, None)]
+
+        for i in range(self.background.n_cmp):
+            _str = 'bkg_amp_' + str(i)
+            _str_v = 'bkg_' + str(i)
+            bkg_input = (_str, _str_v, self.background.ds[:, i], None, None)
+            self.problem_input.append(bkg_input)
+
         self.nonlinear_labels = self.solute.par0.keys()
 
 
@@ -575,13 +640,15 @@ class SolutionScatteringModel:
                                                                    self.solvent.dsdt_orig, self.solvent.C_orig)
         self.solvent.dsdr, _              = bin_vector_with_covmat(qfit, self.solvent.q,
                                                                    self.solvent.dsdr_orig, None)
-
+        self.background.ds, _ = bin_vector_with_covmat(qfit, self.background.q,
+                                                      self.background.ds_orig, None)
 
     def prepare_parameters(self,
                            esf_dict={ 'value' : 0, 'vary' : True},
                            cage_dict={'value' : 1, 'vary' : False},
                            dsdt_dict={'value' : 0, 'vary' : True},
                            dsdr_dict={'value' : 0, 'vary' : True},
+                           bkg_dict={'value': 0, 'vary': True},
                            **kwargs):
 
         params0 = lmfit.Parameters()
@@ -615,6 +682,14 @@ class SolutionScatteringModel:
                 params0.add('dsdr_amp', value=0, vary=False)
             else:
                 params0.add('dsdr_amp', **dsdr_dict)
+
+        if self.background is None:
+            self.background = Background((np.array([0, 1e6]), np.array([0, 0])))
+            params0.add('bkg_amp_0', value=0, vary=False)
+        else:
+            for i in range(self.background.n_cmp):
+                _str = 'bkg_amp_' + str(i)
+                params0.add(_str, **bkg_dict)
 
         for key in self.solute.par0.keys():
             # print((lab+'_dict'), kwargs.keys(), (lab+'_dict') in kwargs.keys())
@@ -657,12 +732,16 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
     result = optimizedResult(q, t, t_str, param_labels, vector_labels, description)
 
     curve_counter = 1
+
+    # Js = []
+
     for i in i_generator:
         starting_time = time.perf_counter()
         print('Fitting time delay', t_str[i],'\tProgress:', curve_counter, '/', n_curves, end=' \t ')
         regressor = MainRegressor(Yt[:, i], C * K[i, i], problem_input,
                                   params0, nonlinear_labels=nonlinear_labels)
         regressor.fit(method=method, prefit=prefit)
+        # Js.append(regressor.J)
         vector_dict = {yt_label : regressor.yt,
                        Cyt_label : regressor.Cyt,
                        yt_err_label : np.sqrt(np.diag(regressor.Cyt)),
@@ -683,6 +762,12 @@ def _fit(q, t, t_str, Yt, C, K, problem_input, nonlinear_labels, params0, method
 
         print('took %0.0f' %((time.perf_counter() - starting_time)*1e3), 'ms')
         curve_counter += 1
+
+    # bigJ = linalg.block_diag(*Js)
+    # Cqqtt_inv = np.kron(np.linalg.inv(C), np.linalg.inv(K))
+    # Hpptt = bigJ.T @ Cqqtt_inv @ bigJ
+    # Cpptt = np.linalg.inv(Hpptt)
+    # print(np.sqrt(np.diag(Cpptt)), regressor.p_err)
 
     return result
 
@@ -717,6 +802,13 @@ class optimizedResult:
                             ['chisq', 'chisq_red'] + ['q', 't', 't_str'])
         self.description_dict = description
 
+    def __deepcopy__(self, memodict={}):
+        out = optimizedResult(self.q, self.t, self.t_str, self.param_labels, self.vector_labels,
+                               self.description_dict)
+        for each_t_str in self.t_str:
+            out[each_t_str] = copy.deepcopy(self[each_t_str])
+        return out
+
 
     def __repr__(self):
         _d = self.description_dict
@@ -740,7 +832,6 @@ class optimizedResult:
             self._d[key_num] = entry
         except ValueError:
             pass
-
 
 
 
