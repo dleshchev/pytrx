@@ -4,9 +4,9 @@ from abc import (ABC as _ABC, abstractmethod as _abstractmethod)
 
 
 class DebyeWaller(_ABC):
-    ''' Abstract class for transformations
-
-        '''
+    '''
+    Abstract class for Debye-Waller dispersions
+    '''
 
     def __init__(self, suffix=None, standard_value=None):
         if type(suffix) != list:
