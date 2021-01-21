@@ -495,7 +495,7 @@ def GRfromFile(filename, delimiter=', ', normalize=False, rmin=25, rmax=30):
     # print(el_pairs)
     gr = GR(els)
 
-    r = data[:, 0]
+    r = data[1:, 0]
 
     for i, pair in enumerate(el_pairs):
         gr_array = data[1:, i + 1]
